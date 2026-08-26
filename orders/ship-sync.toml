@@ -1,0 +1,12 @@
+# Scheduled reconcile: the backstop trigger that makes every other ship
+# trigger (formula final steps, optional git hooks) non-load-bearing.
+# Docs edited outside any workflow — human hand-edits especially — reach
+# the bank through this order. The bank is eventually consistent with the
+# docs tree; this order is the convergence guarantee.
+[order]
+description = "Reconcile all docs trees into the Hindsight bank"
+scope = "city"
+formula = "mol-hindsight-ship"
+trigger = "cooldown"
+interval = "1h"
+pool = "archivist"

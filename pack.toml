@@ -1,0 +1,31 @@
+# Hindsight — platform memory pack.
+#
+# Gives a Gas City a shared Hindsight memory bank over the platform's
+# authored documents: PRDs, specs, ADRs, conventions, surveys, gotchas.
+# Agents read the bank to discover platform-wide direction from inside a
+# single rig; the pack's archivist is the bank's only writer.
+#
+# Design docs (bank half + integration half) ship inside this pack:
+#   bank-template.json   — the bank manifest, source of truth
+#   retain-contract.md   — what every writer must send on retain
+#   agent-runbook.md     — hand this to any agent that reads the bank
+#   rebuild.md           — teardown, rebuild, bulk load, cost map
+#
+# Referenced by workspace.pack (the archivist is city-scoped). Rigs need
+# no per-rig sessions from this pack — rig agents consume the skills and
+# call the read patterns; only the archivist writes.
+
+[pack]
+name = "hindsight"
+schema = 2
+version = "0.1.0"
+description = "Shared platform memory on Hindsight: doc shipping, bank maintenance, and read patterns for agents"
+
+# The archivist: single writer for the bank. City-scoped, woken by orders
+# (scheduled ship sync, nightly consolidation) or by slinging a gate or
+# ship formula at it. max_active_sessions = 1 in its agent.toml is what
+# structurally enforces the single-writer rule — do not raise it.
+[[named_session]]
+template = "archivist"
+scope = "city"
+mode = "on_demand"

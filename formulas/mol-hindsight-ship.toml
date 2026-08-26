@@ -1,0 +1,72 @@
+description = """
+Reconcile the platform's docs trees into the Hindsight memory bank.
+
+Runs ship-docs.sh: walks every docs root, validates frontmatter against the
+retain contract, ships every doc whose content changed since its last
+shipped state, serializes per document_id, and polls all operations to
+terminal status. Over-shipping is harmless (document_id retains are
+idempotent); missed shipping is the silent failure this formula exists to
+prevent. Correctness lives in the script; this formula is a dumb trigger —
+one of several (formula final steps and an optional git hook may also poke
+the same script).
+"""
+formula = "mol-hindsight-ship"
+version = "0.1.0"
+phase = "vapor"
+
+[vars]
+
+[vars.bank]
+description = "Hindsight bank id to ship into"
+default = "stacked-chips-v2"
+
+[vars.docs_roots]
+description = "Space-separated docs roots to walk. 'auto' derives each rig's docs/ directory from gc rig list, plus the city's own docs/ if present."
+default = "auto"
+
+[vars.dry_run]
+description = "If 'true', validate and report what would ship without writing to the bank"
+default = "false"
+
+[[steps]]
+id = "resolve-roots"
+title = "Resolve docs roots"
+description = """
+Determine which directories to walk. If {{docs_roots}} is 'auto', derive
+roots from `gc rig list --json`: each rig's checkout path joined with
+`docs/`, keeping only directories that exist, plus the city root's `docs/`
+if present. Otherwise use {{docs_roots}} verbatim. Record the resolved
+list in the bead notes so the run is auditable.
+"""
+
+[[steps]]
+id = "ship-sync"
+title = "Run the ship sync"
+needs = ["resolve-roots"]
+description = """
+Run the pack's ship script against the resolved roots:
+
+    {{.ConfigDir}}/assets/scripts/ship-docs.sh \
+      --bank {{bank}} \
+      $([ "{{dry_run}}" = "true" ] && echo --dry-run) \
+      <resolved roots...>
+
+The script refuses malformed docs loudly (unknown type/status/source/scope,
+missing required fields) and prints a per-doc report: shipped, skipped
+(unchanged), refused, failed. Do not edit docs to force them through — a
+refusal is a finding, not an obstacle.
+"""
+
+[[steps]]
+id = "report"
+title = "Report outcomes"
+needs = ["ship-sync"]
+description = """
+Summarize the run in the bead notes: counts of shipped / skipped / refused /
+failed, and the specific doc ids for anything refused or failed. If any doc
+FAILED extraction (operation status 'failed'), read the operation's
+error_message, and mail the mayor with doc id + error. If docs were REFUSED
+for frontmatter problems, mail the rig that owns them (or the mayor if
+ownership is unclear) with the exact validation error. A clean run needs no
+mail — close quietly.
+"""

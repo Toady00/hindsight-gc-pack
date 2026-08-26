@@ -1,0 +1,11 @@
+# Nightly consolidation + audit. Deliberately not per-ship: consolidation
+# is expensive (~160s for a 6-doc corpus) and observations are allowed to
+# lag raw memories. Runs off-peak relative to the hourly ship-sync order;
+# the formula's drain step keeps the two from overlapping a moving corpus.
+[order]
+description = "Nightly Hindsight consolidation, tag audit, and mental-model spot-audit"
+scope = "city"
+formula = "mol-hindsight-consolidate"
+trigger = "cooldown"
+interval = "24h"
+pool = "archivist"

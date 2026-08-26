@@ -1,0 +1,91 @@
+description = """
+Nightly bank maintenance: drain, consolidate, audit.
+
+Consolidation is scheduled, not per-ship: it took ~160s on a 6-doc test
+corpus, so running it after every ship does not scale. Ship continuously,
+consolidate nightly, accept that observations lag raw memories by hours —
+raw recall is immediate; synthesis is a daily paper, not a ticker.
+
+The audit half exists because synthesis occasionally over-connects (a
+draft's date was once reported as the accepted spec being 'reaffirmed').
+Directives keep such drift attributed, but spot-audits are the backstop.
+"""
+formula = "mol-hindsight-consolidate"
+version = "0.1.0"
+phase = "vapor"
+
+[vars]
+
+[vars.bank]
+description = "Hindsight bank id"
+default = "stacked-chips-v2"
+
+[vars.audit_models]
+description = "Space-separated mental model ids to spot-audit this run (rotate over time)"
+default = "conventions-and-standards landmines"
+
+[[steps]]
+id = "drain"
+title = "Verify no operations are in flight"
+description = """
+List operations for {{bank}} and count non-terminal statuses (pending /
+processing). If any exist, wait and re-check (10s intervals, up to 10
+minutes). Consolidating while extractions are in flight bakes a partial
+corpus into observations. If operations are still pending after the wait,
+skip consolidation this run and note why in the bead — never consolidate
+over a moving corpus.
+
+Redirect all CLI output to files and extract fields with jq — never dump
+raw hindsight output into your context (operation lists can be large).
+"""
+
+[[steps]]
+id = "consolidate"
+title = "Run consolidation"
+needs = ["drain"]
+description = """
+Run `hindsight bank consolidate {{bank}} --wait`. On failure, run
+`hindsight bank consolidation-recover {{bank}}` once, retry once, and if it
+fails again mail the mayor with the error rather than looping.
+"""
+
+[[steps]]
+id = "tag-audit"
+title = "Audit tag hygiene"
+needs = ["consolidate"]
+description = """
+Fetch the tag list (`hindsight -o json tag list {{bank}} --limit 500`,
+redirected to a file). Check for: values outside the six axes
+(scope/repo/domain/memory_type/source/status), near-duplicate or
+casing-split values (domain:billing vs domain:Billing), repo: values that
+match no rig in `gc rig list`, and status/source values outside the
+contract's vocabulary. Malformed tags mean a writer bypassed the shipper —
+that is an incident, not a cleanup task: identify the writer, mail the
+mayor. Fixes happen at the source (correct the doc, re-ship), never by
+editing memories.
+"""
+
+[[steps]]
+id = "model-audit"
+title = "Spot-audit mental models"
+needs = ["consolidate"]
+description = """
+For each id in {{audit_models}}: fetch it (redirect to file, read only
+.content), and check its claims against what you know the corpus
+establishes — flag claims that name decisions, dates, or reaffirmations no
+document made, or that promote a draft/voice-memo position to platform
+fact. You are reading for overreach, not completeness. Note findings in
+the bead; mail the mayor only if a model is asserting something materially
+wrong.
+"""
+
+[[steps]]
+id = "report"
+title = "Close out"
+needs = ["tag-audit", "model-audit"]
+description = """
+Write a terse summary to bead notes: consolidation duration, tag audit
+result (clean / findings), model audit result (clean / findings). Mail the
+mayor only when something needs a human or coordinator decision. A clean
+night closes silently.
+"""

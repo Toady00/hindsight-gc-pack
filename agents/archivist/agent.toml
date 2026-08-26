@@ -1,0 +1,15 @@
+# The archivist — the bank's single writer.
+#
+# max_active_sessions = 1 is load-bearing: re-retaining a document_id while
+# a prior operation for it is still processing orphans memories that no
+# future replace can reach (verified 2026-08-25, retain-contract.md).
+# One archivist session at a time makes the single-writer rule structural
+# instead of aspirational. Do not raise it.
+
+scope = "city"
+wake_mode = "fresh"
+work_dir = ".gc/agents/archivist"
+nudge = "Run gc hook --claim --json now; if it returns work, execute the claimed formula immediately."
+idle_timeout = "30m"
+min_active_sessions = 0
+max_active_sessions = 1
