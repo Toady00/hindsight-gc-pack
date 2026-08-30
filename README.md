@@ -37,6 +37,7 @@ hindsight bank import-template stacked-chips-v2 bank-template.json
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `skills/hindsight-memory/` | Read patterns for every agent: reflect/recall cadence, scoping, status semantics, `tag_groups` caveats |
 | `skills/hindsight-shipping/` | Write patterns for authoring agents: frontmatter contract, gates, gotcha capture |
+| `template-fragments/` | The **fragment contract**: `hindsight-brief` / `hindsight-propose` dispatchers consumers wire into any agent's prompt (see below) |
 | `test/` | Rehearsal harness: dummy docs + validated prototype shipper + probe results from the 2026-08-25 live experiment |
 
 Install into a city (path import while the pack is local):
@@ -103,6 +104,95 @@ intended end-state is a pluggable schema layer — the pack core owns the
 universal mechanics (ref walk, hash diff, drain, metadata stamping, GONE)
 and ships whatever tags the schema derives, without interpreting them;
 `document_metadata` stays the pack's private bookkeeping either way.
+
+## The fragment contract
+
+The pack's second public API, for prompt injection: named template
+fragments any consumer wires into any agent. The pack publishes
+capability; **the layer that owns an agent decides who gets injected**
+(a depending pack for its own agents, a pack patch for agents in its
+import subtree, the city for anything). The pack never decides.
+
+Published names (stable API — renaming one is a breaking change):
+
+| Fragment | Renders |
+|---|---|
+| `hindsight-brief` | Read-side: the bank exists, the one-reflect task-start ritual, optional standing mental models, skill pointer |
+| `hindsight-propose` | Write-side: mail findings to the archivist, who arbitrates retention (single-writer preserved) |
+
+Both are dispatchers gated on a per-agent env var. Each tries the most
+specific registered specialization first, then falls back:
+
+    hindsight-brief-<AgentName>      qualified ("myrig/polecat-1")
+    hindsight-brief-<TemplateName>   config name ("delivery" — one
+                                     define covers a whole pool)
+    hindsight-brief-default          shipped by this pack
+
+Any importing pack or city can define a specialization in its own
+`template-fragments/` — this pack never knows. City-root fragments win
+on name collision, so operators can also replace the defaults outright.
+A missing specialization falls through silently to the default; when a
+custom fragment is not rendering, check the name with `gc prime <agent>`.
+
+### Env contract
+
+Declared in TOML like all city config; env is the delivery mechanism.
+
+| Var | Where | Meaning |
+|---|---|---|
+| `HINDSIGHT_BANK` | `[workspace] env` — once per city | Bank id. Process-env only (workspace env is not template-visible), which is why fragment prose references it as `$HINDSIGHT_BANK` |
+| `HINDSIGHT_API` | `[workspace] env`, optional | API base URL override for the CLI |
+| `HINDSIGHT_MEMORY` | per-agent `env` / patch | Set non-empty to render `hindsight-brief`. THE opt-in switch |
+| `HINDSIGHT_PROPOSE` | per-agent `env` / patch | Set non-empty to render `hindsight-propose` |
+| `HINDSIGHT_MENTAL_MODELS` | per-agent `env`, optional | Space-separated mental-model ids fetched at session start |
+| `HINDSIGHT_ARCHIVIST` | per-agent `env`, optional | Mail target for proposals (default `archivist`; set when the import binding qualifies the name) |
+
+### Wiring recipes
+
+Shared plumbing, once per city:
+
+```toml
+[workspace]
+env = { HINDSIGHT_BANK = "stacked-chips-v2" }
+```
+
+Your own agent (a depending pack's `agent.toml`):
+
+```toml
+append_fragments = ["hindsight-brief"]
+env = { HINDSIGHT_MEMORY = "1", HINDSIGHT_MENTAL_MODELS = "product-context landmines" }
+```
+
+An agent from a pack you import (pack- or city-level patch):
+
+```toml
+[[patches.agent]]
+name = "mayor"
+inject_fragments_append = ["hindsight-brief"]
+env = { HINDSIGHT_MEMORY = "1" }
+```
+
+A worker pool (patch the template agent; instances inherit):
+
+```toml
+[[patches.agent]]
+name = "polecat"
+rig = "*"
+inject_fragments_append = ["hindsight-propose"]
+env = { HINDSIGHT_PROPOSE = "1" }
+```
+
+Custom prose for one agent, no pack edits — define in any
+`template-fragments/` the agent can see:
+
+```
+{{define "hindsight-brief-delivery"}}...your prose...{{end}}
+```
+
+Because injection rides the prompt template, it is delivered at session
+start and re-delivered after compaction on every harness gc manages
+(claude/codex re-prime via hooks and handoff restarts; opencode
+re-injects the prime into the system prompt each turn).
 
 ---
 
