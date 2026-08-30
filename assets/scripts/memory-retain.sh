@@ -99,7 +99,8 @@ if $BUMP; then
   fi
   # Reconstruct title/type/scope/source/repos/domains from the stored doc
   # unless overridden on the command line.
-  [[ -n "$TITLE" ]] || TITLE="$(jq -r '.context // ""' "$TMP/doc.json" | sed 's/^[a-z-]*: //; s/ — .*//')"
+  [[ -n "$TITLE" ]] || TITLE="$(jq -r '.document_metadata.title // .retain_params.metadata.title // ""' "$TMP/doc.json")"
+  [[ -n "$TITLE" ]] || { echo "bump: stored doc has no metadata.title; pass --title" >&2; exit 3; }
   tags_json="$(jq -c '.tags // []' "$TMP/doc.json")"
   [[ -n "$REPOS" ]]   || REPOS="$(jq -r '[.[] | select(startswith("repo:")) | sub("^repo:";"")] | join(",")' <<<"$tags_json")"
   [[ -n "$DOMAINS" ]] || DOMAINS="$(jq -r '[.[] | select(startswith("domain:")) | sub("^domain:";"")] | join(",")' <<<"$tags_json")"
@@ -146,12 +147,15 @@ tags="$(jq -cn --arg scope "$SCOPE" --arg type "$TYPE" --arg source "$SOURCE" \
   + ["memory_type:\($type)", "source:\($source)"]')"
 oscopes="$(jq -cn --arg scope "$SCOPE" --argjson repos "$repos_json" --argjson domains "$domains_json" '
   ($domains | map(["domain:\(.)"])) + ($repos | map(["repo:\(.)"])) + [["scope:\($scope)"]]')"
+# metadata values must be strings (API rejects numbers) — hit_count rides
+# as a string and is parsed back to int on --bump. title is stored so a
+# bump can rebuild the context line without parsing it back apart.
 payload="$(jq -cn --arg content "$CONTENT" --arg doc_id "$ID" --arg context "$context" \
-  --arg ts "$NOW" --arg strategy "$STRATEGY" --argjson hits "$HIT_COUNT" \
+  --arg ts "$NOW" --arg strategy "$STRATEGY" --arg hits "$HIT_COUNT" --arg title "$TITLE" \
   --argjson tags "$tags" --argjson oscopes "$oscopes" '
   {items: [{content: $content, document_id: $doc_id, context: $context, timestamp: $ts,
             strategy: $strategy, tags: $tags, observation_scopes: $oscopes,
-            metadata: {kind: "agent-memory", hit_count: $hits}}],
+            metadata: {kind: "agent-memory", hit_count: $hits, title: $title}}],
    async: true}')"
 
 if $DRY_RUN; then

@@ -141,9 +141,9 @@ hindsight -o json memory recall "$HINDSIGHT_BANK" "<symptom>" \
   --tags repo:<rig>,scope:platform --tags-match any_strict \
   --budget low --max-tokens 1024 > "$TMP/dedup.json" 2>/dev/null
 jq -r '.results[]?.text' "$TMP/dedup.json"
-# existing agent memories, with their ids and hit counts
+# existing agent memories, with their ids and hit counts (paged: .items)
 hindsight -o json document list "$HINDSIGHT_BANK" > "$TMP/docs.json" 2>/dev/null
-jq -r '.[] | select(.document_metadata.kind == "agent-memory")
+jq -r '.items[] | select(.document_metadata.kind == "agent-memory")
   | "\(.id)\thits=\(.document_metadata.hit_count // 1)"' "$TMP/docs.json"
 ```
 
