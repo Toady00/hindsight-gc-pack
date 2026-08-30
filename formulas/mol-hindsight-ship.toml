@@ -1,14 +1,20 @@
 description = """
 Reconcile the platform's docs trees into the Hindsight memory bank.
 
-Runs ship-docs.sh: walks every docs root, validates frontmatter against the
-retain contract, ships every doc whose content changed since its last
-shipped state, serializes per document_id, and polls all operations to
-terminal status. Over-shipping is harmless (document_id retains are
-idempotent); missed shipping is the silent failure this formula exists to
-prevent. Correctness lives in the script; this formula is a dumb trigger —
-one of several (formula final steps and an optional git hook may also poke
-the same script).
+Runs the pack's ship command: reads the committed content of every docs
+root's canonical ref (origin/HEAD, falling back to local HEAD — never the
+working tree, so branch switches and dirty checkouts cannot leak
+unpublished content), validates frontmatter against the retain contract,
+and ships every published doc whose content differs from the bank's copy.
+The shipper is stateless — the bank is the ledger (each retain stamps a
+content hash the differ reads back), so any machine computes the same
+diff with nothing local to sync or lose. It drains in-flight bank
+operations before shipping and polls its own operations to terminal. Over-shipping is harmless (document_id retains are idempotent);
+missed shipping is the silent failure this formula exists to prevent.
+Correctness lives in the script; this formula is a dumb trigger — one of
+several. Humans and other formulas can run the same path at any time via
+the pack's `ship` command (which also owns dry-run for manual previews;
+this workflow always ships for real).
 """
 formula = "mol-hindsight-ship"
 version = "0.1.0"
@@ -21,40 +27,29 @@ description = "Hindsight bank id to ship into"
 default = "stacked-chips-v2"
 
 [vars.docs_roots]
-description = "Space-separated docs roots to walk. 'auto' derives each rig's docs/ directory from gc rig list, plus the city's own docs/ if present."
-default = "auto"
-
-[vars.dry_run]
-description = "If 'true', validate and report what would ship without writing to the bank"
-default = "false"
-
-[[steps]]
-id = "resolve-roots"
-title = "Resolve docs roots"
-description = """
-Determine which directories to walk. If {{docs_roots}} is 'auto', derive
-roots from `gc rig list --json`: each rig's checkout path joined with
-`docs/`, keeping only directories that exist, plus the city root's `docs/`
-if present. Otherwise use {{docs_roots}} verbatim. Record the resolved
-list in the bead notes so the run is auditable.
-"""
+description = "Space-separated docs roots. Empty means auto: every rig's docs/ directory plus the city's own docs/ if present."
+default = ""
 
 [[steps]]
 id = "ship-sync"
 title = "Run the ship sync"
-needs = ["resolve-roots"]
 description = """
-Run the pack's ship script against the resolved roots:
+Run the pack's ship command:
 
-    {{.ConfigDir}}/assets/scripts/ship-docs.sh \
-      --bank {{bank}} \
-      $([ "{{dry_run}}" = "true" ] && echo --dry-run) \
-      <resolved roots...>
+    {{.ConfigDir}}/commands/ship/run.sh --bank {{bank}} --fetch {{docs_roots}}
 
-The script refuses malformed docs loudly (unknown type/status/source/scope,
-missing required fields) and prints a per-doc report: shipped, skipped
-(unchanged), refused, failed. Do not edit docs to force them through — a
-refusal is a finding, not an obstacle.
+(--fetch keeps each repo's origin/HEAD current before shipping, so a
+quiet docs repo cannot ship stale-by-one-push content; a fetch failure
+warns and ships as-fetched rather than blocking.)
+
+With no roots it auto-resolves them (each rig's docs/ from `gc rig list`,
+plus the city's own docs/) and prints the resolved list — keep that in the
+bead notes so the run is auditable. The script refuses malformed docs
+loudly (unknown type/status/source/scope, missing required fields) and
+prints a per-doc report: SHIPPED, skipped (unchanged), REFUSED, FAILED,
+plus GONE (in the bank but missing from the walk — deprecate-in-place was
+violated somewhere). Do not edit docs to force them through — a refusal
+is a finding, not an obstacle.
 """
 
 [[steps]]
