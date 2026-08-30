@@ -118,10 +118,12 @@ Published names (stable API — renaming one is a breaking change):
 | Fragment | Renders |
 |---|---|
 | `hindsight-brief` | Read-side: the bank exists, the one-reflect task-start ritual, optional standing mental models, skill pointer |
-| `hindsight-propose` | Write-side: mail findings to the archivist, who arbitrates retention (single-writer preserved) |
+| `hindsight-propose` | Write-side: self-filter + the four-field proposal mail to the archivist, who arbitrates retention (single-writer preserved) |
+| `hindsight-arbitrate` | The archivist's acceptance policy: dedup-first (bump `hit_count` on repeat reports), four gates, deny-biased. Wired by this pack onto its own archivist; no gate var |
 
-Both are dispatchers gated on a per-agent env var. Each tries the most
-specific registered specialization first, then falls back:
+All are dispatchers; `brief` and `propose` are additionally gated on a
+per-agent env var. Each tries the most specific registered
+specialization first, then falls back:
 
     hindsight-brief-<AgentName>      qualified ("myrig/polecat-1")
     hindsight-brief-<TemplateName>   config name ("delivery" — one
@@ -140,7 +142,7 @@ Declared in TOML like all city config; env is the delivery mechanism.
 
 | Var | Where | Meaning |
 |---|---|---|
-| `HINDSIGHT_BANK` | `[workspace] env` — once per city | Bank id. Process-env only (workspace env is not template-visible), which is why fragment prose references it as `$HINDSIGHT_BANK` |
+| `HINDSIGHT_BANK` | `[workspace] env` — once per city, **required** | Bank id. No hardcoded default anywhere — scripts, command, and formulas fail loudly when unset. Process-env only (workspace env is not template-visible), which is why fragment prose references it as `$HINDSIGHT_BANK`. 1:1 city-to-bank is the intended shape; a per-agent `env` override is the escape hatch |
 | `HINDSIGHT_API` | `[workspace] env`, optional | API base URL override for the CLI |
 | `HINDSIGHT_MEMORY` | per-agent `env` / patch | Set non-empty to render `hindsight-brief`. THE opt-in switch |
 | `HINDSIGHT_PROPOSE` | per-agent `env` / patch | Set non-empty to render `hindsight-propose` |
@@ -193,6 +195,22 @@ Because injection rides the prompt template, it is delivered at session
 start and re-delivered after compaction on every harness gc manages
 (claude/codex re-prime via hooks and handoff restarts; opencode
 re-injects the prime into the system prompt each turn).
+
+## Agent-contributed memory
+
+The pipeline for what agents learn the hard way: **proposal mail →
+arbitration → a typed doc → shipped**. Workers never write; they mail
+the archivist (`hindsight-propose` carries the format and self-filter).
+The archivist checks for existing coverage first — a repeat report bumps
+the doc's `hit_count` and refreshes `updated_at`, so the whole-file hash
+re-ships it and the bank timestamp stays fresh exactly as often as the
+issue actually bites; a rising count on an existing memory is the signal
+that the memory is not landing. New reports face four deny-biased gates
+(verified / a trap / expensive when sprung / durable —
+`hindsight-arbitrate` is the policy, the `hindsight-shipping` skill the
+mechanics). Accepted docs live in the platform docs repo, tagged
+`repos:` for the rigs they bite — `type: gotcha` today; the pipeline is
+type-agnostic and new agent-memory types are one schema-table row away.
 
 ---
 

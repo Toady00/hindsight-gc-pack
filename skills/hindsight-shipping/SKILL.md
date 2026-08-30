@@ -1,6 +1,6 @@
 ---
 name: hindsight-shipping
-description: Getting documents into the platform memory bank — frontmatter contract, the ship path, gates, and gotcha capture
+description: Getting documents into the platform memory bank — frontmatter contract, the ship path, approval recording, and agent-contributed memory via archivist proposals
 ---
 
 # Shipping documents to the memory bank
@@ -74,11 +74,27 @@ verdict must look like in frontmatter:
 - Rejection is not a status: the doc simply stays `draft`; feedback lives
   in your workflow's work tracking, not in frontmatter.
 
-## Gotcha capture — the one direct-write exception
+## Agent-contributed memory — proposals, not direct writes
 
-When something costs you real time and would cost the next agent the same,
-write a gotcha doc in your rig's docs tree and commit it; the sync ships
-it. Keep it short and literal:
+When something costs you real time and would cost the next agent the
+same, you do NOT write it to the bank or the docs tree yourself. Mail a
+memory proposal to the archivist (the `hindsight-propose` fragment in
+your prompt carries the format and the self-filter). The archivist
+arbitrates: checks for existing coverage, applies the acceptance gates,
+and authors the doc if it clears the bar. One filter, one writer.
+
+Do NOT harvest proposals from session transcripts, and never propose
+progress notes, tool output, or coordination chatter — the never-retain
+list in the contract is absolute.
+
+### Archivist mechanics (arbitration accepted → doc)
+
+Agent-contributed docs live in the **platform docs repo** (not rig
+trees — you are the only committer there for this purpose), tagged
+`repos:` for the rigs they bite; retrieval scoping rides the tags, not
+the file's location. Usually `type: gotcha`; pick the type that fits
+the content — the type table is the menu, and new agent-memory types
+are added to the schema deliberately, not improvised mid-arbitration.
 
 ```markdown
 ---
@@ -89,8 +105,9 @@ title: tflint provider cache lock
 source: agent
 scope: repo
 repos: [terraform-platform]
+hit_count: 1                # times agents reported hitting this
 created_at: <now>
-updated_at: <now>
+updated_at: <now>           # bump on EVERY hit — keeps the bank timestamp fresh
 ---
 ## Symptom
 <exact error text>
@@ -100,18 +117,40 @@ updated_at: <now>
 <the correct approach, exact commands>
 ## Applies to
 <where this bites>
+
+Reported 1 time (last: <date>).
 ```
 
-Do NOT harvest gotchas from session transcripts, and do not retain
-progress notes, tool output, or coordination chatter — the never-retain
-list in the contract is absolute.
+The trailing report line is body text on purpose: it survives into
+retained content, so agents whose reflect surfaces this memory also see
+how often it bites.
+
+**Dedup check** (before judging any proposal):
+
+```bash
+rg -il "<symptom key terms>" <docs-repo>/ --glob '*.md'   # lexical, finds the file to edit
+hindsight -o json memory recall "$HINDSIGHT_BANK" "<symptom>" \
+  --tags repo:<rig> --tags-match any_strict --budget low --max-tokens 1024 \
+  > "$TMP/dedup.json" 2>/dev/null && jq -r '.results[]?.text' "$TMP/dedup.json"
+```
+
+**Bump on a repeat hit** (fully covered, or covered-plus-merge): edit
+the doc — increment `hit_count`, update the body's report line, merge
+any new information, bump `updated_at` — commit (one commit per
+verdict, message naming the reporter and mail id), and ship. The
+whole-file hash makes even a count-only change re-ship, which refreshes
+the bank's timestamp: a frequently-hit issue stays fresh, and one whose
+truth has drifted ages out of recency naturally. A rising `hit_count`
+on an existing memory means the memory is not landing — that is a
+system-deficiency signal, visible with
+`rg "hit_count:" <docs-repo>/ --glob '*.md'`.
 
 ## If you must call the ship script yourself
 
 Formula final steps may run the sync for immediacy:
 
 ```bash
-<pack>/assets/scripts/ship-docs.sh --bank stacked-chips-v2 <docs-root>
+<pack>/assets/scripts/ship-docs.sh <docs-root>   # bank from $HINDSIGHT_BANK
 ```
 
 It validates, skips unchanged docs, serializes per document (never races a

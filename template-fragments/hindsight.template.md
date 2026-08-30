@@ -10,6 +10,9 @@
 
     hindsight-brief      read-side: memory exists, task-start ritual
     hindsight-propose    write-side: propose memories via archivist mail
+    hindsight-arbitrate  the archivist's acceptance policy for proposals
+                         (wired by this pack onto its own archivist; no
+                         gate var — override via the dispatch chain)
 
   Both are dispatchers. Each renders nothing unless its per-agent gate
   env var is set, then routes to the most specific registered
@@ -80,12 +83,78 @@ tags), and compound query patterns.
 You never write to the memory bank directly. When you hit something a
 future agent must know — a landmine, a non-obvious constraint, behavior
 that contradicts the docs — mail the archivist, who arbitrates what
-becomes memory:
+becomes memory.
+
+Self-filter first. Do NOT propose it if:
+
+- it failed loudly and self-explanatorily right where the mistake was
+  made — the system already teaches it;
+- the fix is already documented where you would have looked;
+- you did not verify it — suspicion is not a finding;
+- it has an expiry date (an outage, an in-flight migration, today's
+  state) — that is mail and bead territory, not memory.
+
+What clears the bar: a verified surprise whose failure was silent,
+misleading, or far from its cause — the kind that would cost the next
+agent the same time it cost you.
 
     gc mail send {{or .HINDSIGHT_ARCHIVIST "archivist"}} -s "memory proposal: <one line>" \
-      -m "<what you found, where, how you verified it, why a future agent must know>"
+      -m "<see required contents below>"
 
-One mail per finding; never batch unrelated findings. The archivist may
-fold it into a doc, capture it as a gotcha, or reject it — retention is
-the archivist's call, not yours. Keep working; do not wait for a reply.
+Your mail must cover all four, or it bounces:
+
+1. What happened — exact commands, paths, error text.
+2. How you verified it — reproduced, or observed with what evidence.
+3. How the failure presented — silent? misleading error? far from the
+   cause?
+4. What a future agent should do differently.
+
+One mail per finding; never batch unrelated findings. Retention is the
+archivist's call, not yours — keep working; do not wait for a reply.
+{{- end}}
+
+{{define "hindsight-arbitrate"}}{{templateFirst . (printf "hindsight-arbitrate-%s" .AgentName) (printf "hindsight-arbitrate-%s" .TemplateName) "hindsight-arbitrate-default"}}{{end}}
+
+{{define "hindsight-arbitrate-default" -}}
+## Arbitrating memory proposals
+
+Proposals arrive by mail. You are the only gate between agent
+experience and the memory bank: be defensive — **deny is the default
+verdict**, and unsure means deny. Work each proposal in order:
+
+1. **Complete?** The mail must say: what happened, how it was verified,
+   how the failure presented, and what a future agent should do
+   differently. Anything missing → one-line bounce asking for it; no
+   judgment yet.
+2. **Existing coverage — check before judging** (mechanics in the
+   `hindsight-shipping` skill): search the agent-memory docs for the
+   symptom's key terms, then one low-budget `recall` against the bank.
+   - **Fully covered** → bump the existing doc's `hit_count`, refresh
+     `updated_at`, commit, ship. The repeat report is itself a finding:
+     the memory existed and did not land, and the count records that.
+   - **Related, but adds new information** → merge it into the existing
+     doc (same `id`), bump `hit_count`, refresh `updated_at`, ship.
+   - **No match** → the four gates decide.
+3. **The four gates — ALL must pass; a gate you are unsure about
+   fails:**
+   - **Verified.** It actually happened and the mail shows how it was
+     confirmed. Inference or suspicion → deny.
+   - **A trap.** A competent agent doing the reasonable thing — reading
+     the docs, following convention, taking the obvious path — would
+     hit it. If the truth is already written where that agent would
+     look → deny.
+   - **Expensive when sprung.** The failure was silent, misleading, or
+     far from its cause. A loud, immediate, self-explanatory failure at
+     the point of the mistake → deny; the system already teaches it.
+   - **Durable.** Pinned to code, tools, or architecture that persists.
+     Anything with an expiry date → deny.
+4. **Routing beats retaining.** If the root cause is a doc that
+   affirmatively says the wrong thing, mail the owning rig to fix the
+   doc instead of accepting — the bank converges on the corrected doc.
+5. **Accept** → author the doc yourself in the platform docs repo
+   (usually `type: gotcha`; pick the type that fits), tag `repos:` with
+   the rigs it bites, commit, ship. Mechanics in the
+   `hindsight-shipping` skill.
+6. **Reply one line either way** — verdict and reason. That is how
+   proposers calibrate against the bar.
 {{- end}}
