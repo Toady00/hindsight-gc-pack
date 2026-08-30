@@ -11,7 +11,9 @@ serialized, refuses malformed frontmatter loudly).
 ship                    Auto-resolve roots (every rig's docs/ + city docs/), ship changes
 ship --dry-run          Validate and report what would ship; writes nothing
 ship <root> [<root>..]  Ship specific docs roots only
-ship --bank <id> ...    Target a non-default bank (e.g. a test bank rehearsal)
+ship --bank <id> ...    Override the bank (e.g. a test bank rehearsal);
+                        default is $HINDSIGHT_BANK from workspace env,
+                        and there is no fallback — unset means refuse
 ship --fetch            git fetch origin in each root first (the scheduled
                         order does this; ad-hoc runs usually don't need it)
 ```
@@ -36,7 +38,7 @@ filesystem.
   order fires.
 - You want to preview what a frontmatter change does: `ship --dry-run`.
 - You are rehearsing a bulk load against a test bank: `ship --bank
-  stacked-chips-v2-test <root>`.
+  <bank>-test <root>`.
 
 Exit non-zero means docs were refused (frontmatter violates the retain
 contract) or failed extraction — read the per-doc report; fix the doc,

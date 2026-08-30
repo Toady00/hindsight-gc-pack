@@ -22,10 +22,6 @@ phase = "vapor"
 
 [vars]
 
-[vars.bank]
-description = "Hindsight bank id to ship into"
-default = "stacked-chips-v2"
-
 [vars.docs_roots]
 description = "Space-separated docs roots. Empty means auto: every rig's docs/ directory plus the city's own docs/ if present."
 default = ""
@@ -36,7 +32,10 @@ title = "Run the ship sync"
 description = """
 Run the pack's ship command:
 
-    {{.ConfigDir}}/commands/ship/run.sh --bank {{bank}} --fetch {{docs_roots}}
+    {{.ConfigDir}}/commands/ship/run.sh --fetch {{docs_roots}}
+
+The bank comes from $HINDSIGHT_BANK (workspace env — every city
+declares its own); the command fails loudly if it is unset.
 
 (--fetch keeps each repo's origin/HEAD current before shipping, so a
 quiet docs repo cannot ship stale-by-one-push content; a fetch failure

@@ -18,10 +18,6 @@ phase = "vapor"
 
 [vars]
 
-[vars.bank]
-description = "Hindsight bank id"
-default = "stacked-chips-v2"
-
 [vars.audit_models]
 description = "Space-separated mental model ids to spot-audit this run (rotate over time)"
 default = "conventions-and-standards landmines"
@@ -32,7 +28,10 @@ title = "Run deterministic maintenance"
 description = """
 Run the maintenance script and capture its report in the bead notes:
 
-    {{.ConfigDir}}/assets/scripts/bank-maintain.sh --bank {{bank}}
+    {{.ConfigDir}}/assets/scripts/bank-maintain.sh
+
+The bank comes from $HINDSIGHT_BANK (workspace env); the script fails
+loudly if it is unset.
 
 Branch on its exit code — the script has already done the work; do not
 re-derive its steps by hand:
@@ -62,7 +61,7 @@ Skip this step unless maintain exited 0 or 2 (consolidation actually ran).
 Create a scratch dir (`TMP=$(mktemp -d)`) — every API response lands under
 it, reaped on reboot, never dumped raw into your context. For each id in
 {{audit_models}}: fetch it
-(`hindsight -o json mental-model get {{bank}} <id> > "$TMP/<id>.json"`),
+(`hindsight -o json mental-model get "$HINDSIGHT_BANK" <id> > "$TMP/<id>.json"`),
 read only `.content` via jq — a mental-model response can be 100x larger
 than its readable content — and check its claims against what the corpus
 establishes. Flag claims that name decisions, dates, or reaffirmations no

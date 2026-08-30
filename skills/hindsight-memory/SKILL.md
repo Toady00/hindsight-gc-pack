@@ -5,11 +5,12 @@ description: Reading the platform memory bank — reflect at task start, recall 
 
 # Reading the platform memory bank
 
-Bank: `stacked-chips-v2`. Full read-side reference: `agent-runbook.md` in
-the hindsight pack. This skill is the working subset.
+The bank id comes from your environment (`$HINDSIGHT_BANK`, set once at
+the workspace level). This skill is the working subset of the read-side
+patterns.
 
 ```bash
-BANK=stacked-chips-v2
+BANK="${HINDSIGHT_BANK:?HINDSIGHT_BANK not set — declare it in [workspace] env}"
 ```
 
 ## The cadence

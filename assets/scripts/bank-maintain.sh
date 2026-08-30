@@ -4,10 +4,12 @@
 # agent runs this, reads its report, and applies judgment only to what a
 # script cannot decide (mental-model overreach, escalation).
 #
-#   bank-maintain.sh --bank <id> [options]
+#   bank-maintain.sh [options]
 #
 # Options:
-#   --bank <id>            bank to maintain (required)
+#   --bank <id>            bank to maintain (default: $HINDSIGHT_BANK;
+#                          no hardcoded fallback — every city declares its
+#                          own bank in [workspace] env)
 #   --api <url>            Hindsight API base (default: $HINDSIGHT_API or prod)
 #   --domains <file>       known-domains file, one per line (audit check d)
 #   --drain-timeout <sec>  max wait for in-flight operations (default 600)
@@ -49,7 +51,8 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown arg: $1" >&2; exit 64 ;;
   esac
 done
-[[ -n "$BANK" ]] || { echo "--bank is required" >&2; exit 64; }
+[[ -n "$BANK" ]] || BANK="${HINDSIGHT_BANK:-}"
+[[ -n "$BANK" ]] || { echo "no bank: set HINDSIGHT_BANK in [workspace] env, or pass --bank <id>" >&2; exit 64; }
 
 TMP="$(mktemp -d)"
 TAGFILE="${TMPDIR:-/tmp}/hindsight-tag-audit.$BANK.json"

@@ -26,10 +26,12 @@
 # filesystem — the pack works without git; git is the recommended publish
 # boundary, not a requirement.
 #
-#   ship-docs.sh --bank <bank> [options] <docs-root> [<docs-root>...]
+#   ship-docs.sh [options] <docs-root> [<docs-root>...]
 #
 # Options:
-#   --bank <id>            bank to ship into (required)
+#   --bank <id>            bank to ship into (default: $HINDSIGHT_BANK;
+#                          no hardcoded fallback — every city declares its
+#                          own bank in [workspace] env)
 #   --api <url>            Hindsight API base (default: $HINDSIGHT_API or prod)
 #   --ref <ref>            ship this ref for every git root (default: auto)
 #   --fetch                git fetch origin in each git root first, so
@@ -90,7 +92,8 @@ while [[ $# -gt 0 ]]; do
     *) ROOTS+=("$1"); shift ;;
   esac
 done
-[[ -n "$BANK" ]] || { echo "--bank is required" >&2; exit 2; }
+[[ -n "$BANK" ]] || BANK="${HINDSIGHT_BANK:-}"
+[[ -n "$BANK" ]] || { echo "no bank: set HINDSIGHT_BANK in [workspace] env, or pass --bank <id>" >&2; exit 2; }
 [[ ${#ROOTS[@]} -gt 0 ]] || { echo "at least one docs root is required" >&2; exit 2; }
 
 TMP="$(mktemp -d)"

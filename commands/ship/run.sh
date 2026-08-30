@@ -29,7 +29,17 @@ while [[ $# -gt 0 ]]; do
     *) ROOTS+=("$1"); shift ;;
   esac
 done
-$BANK_SET || PASS+=(--bank "${HINDSIGHT_BANK:-stacked-chips-v2}")
+# The bank is never defaulted: each city declares its own, once, in
+# [workspace] env. Managed sessions inherit it; humans running this
+# outside a managed session export it or pass --bank.
+if ! $BANK_SET; then
+  if [[ -n "${HINDSIGHT_BANK:-}" ]]; then
+    PASS+=(--bank "$HINDSIGHT_BANK")
+  else
+    echo "no bank: set HINDSIGHT_BANK in [workspace] env (or export it), or pass --bank <id>" >&2
+    exit 2
+  fi
+fi
 
 # No roots given: derive each rig's docs/ from the city, plus the city
 # root's own docs/ if present.
