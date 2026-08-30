@@ -81,34 +81,26 @@ same, you do NOT write it to the bank or the docs tree yourself. Mail a
 memory proposal to the archivist (the `hindsight-propose` fragment in
 your prompt carries the format and the self-filter). The archivist
 arbitrates: checks for existing coverage, applies the acceptance gates,
-and authors the doc if it clears the bar. One filter, one writer.
+and retains the memory if it clears the bar. One filter, one writer.
 
 Do NOT harvest proposals from session transcripts, and never propose
 progress notes, tool output, or coordination chatter — the never-retain
 list in the contract is absolute.
 
-### Archivist mechanics (arbitration accepted → doc)
+### Archivist mechanics (arbitration accepted → retain)
 
-Agent-contributed docs live in the **platform docs repo** (not rig
-trees — you are the only committer there for this purpose), tagged
-`repos:` for the rigs they bite; retrieval scoping rides the tags, not
-the file's location. Usually `type: gotcha`; pick the type that fits
-the content — the type table is the menu, and new agent-memory types
-are added to the schema deliberately, not improvised mid-arbitration.
+Agent memories are **bank-native** — no file, no commit, no git. Like
+voice memos, they live only in the bank; the docs corpus ships from
+git, agent memories ship from arbitration. The single write path is
+`assets/scripts/memory-retain.sh`, which builds the contract payload,
+refuses to race a pending operation for the same `document_id` (racing
+orphans memories permanently), and polls to terminal:
 
-```markdown
----
-schema_version: 2
-id: gotcha.tflint-provider-cache-lock
-type: gotcha
-title: tflint provider cache lock
-source: agent
-scope: repo
-repos: [terraform-platform]
-hit_count: 1                # times agents reported hitting this
-created_at: <now>
-updated_at: <now>           # bump on EVERY hit — keeps the bank timestamp fresh
----
+```bash
+# Accept a new memory (content on stdin, Symptom/Cause/Fix/Applies-to):
+memory-retain.sh --id gotcha.tflint-provider-cache-lock \
+  --title "tflint provider cache lock" \
+  --repos terraform-platform --scope repo << 'EOF'
 ## Symptom
 <exact error text>
 ## Cause
@@ -117,33 +109,47 @@ updated_at: <now>           # bump on EVERY hit — keeps the bank timestamp fre
 <the correct approach, exact commands>
 ## Applies to
 <where this bites>
+EOF
 
-Reported 1 time (last: <date>).
+# Repeat report, nothing new: bump count + refresh timestamp
+memory-retain.sh --bump --id gotcha.tflint-provider-cache-lock
+
+# Repeat report with new information: merge, then bump with the merged content
+memory-retain.sh --bump --id gotcha.tflint-provider-cache-lock --content-file merged.md
 ```
 
-The trailing report line is body text on purpose: it survives into
-retained content, so agents whose reflect surfaces this memory also see
-how often it bites.
+Usually `type: gotcha`; pick the type that fits — the type table is the
+menu, and new agent-memory types are added to the schema deliberately,
+not improvised mid-arbitration. Mint ids as `<type>.<slug>`, stable and
+unique; tag `repos:` for every rig the memory bites (that is how rig
+agents discover it — retrieval rides tags, not residency).
+
+The script appends a `Reported N times (last: ...)` line to the
+content on every retain — body text on purpose, so agents whose
+reflect surfaces the memory also see how often it bites — and stamps
+`metadata: {kind: "agent-memory", hit_count: N}`. Every bump re-retains
+the same `document_id`, which refreshes the bank timestamp: a
+frequently-hit issue stays fresh, and one whose truth has drifted ages
+out of recency naturally.
 
 **Dedup check** (before judging any proposal):
 
 ```bash
-rg -il "<symptom key terms>" <docs-repo>/ --glob '*.md'   # lexical, finds the file to edit
+TMP=$(mktemp -d)
+# semantic match against the bank, scoped to the reported rig
 hindsight -o json memory recall "$HINDSIGHT_BANK" "<symptom>" \
-  --tags repo:<rig> --tags-match any_strict --budget low --max-tokens 1024 \
-  > "$TMP/dedup.json" 2>/dev/null && jq -r '.results[]?.text' "$TMP/dedup.json"
+  --tags repo:<rig>,scope:platform --tags-match any_strict \
+  --budget low --max-tokens 1024 > "$TMP/dedup.json" 2>/dev/null
+jq -r '.results[]?.text' "$TMP/dedup.json"
+# existing agent memories, with their ids and hit counts
+hindsight -o json document list "$HINDSIGHT_BANK" > "$TMP/docs.json" 2>/dev/null
+jq -r '.[] | select(.document_metadata.kind == "agent-memory")
+  | "\(.id)\thits=\(.document_metadata.hit_count // 1)"' "$TMP/docs.json"
 ```
 
-**Bump on a repeat hit** (fully covered, or covered-plus-merge): edit
-the doc — increment `hit_count`, update the body's report line, merge
-any new information, bump `updated_at` — commit (one commit per
-verdict, message naming the reporter and mail id), and ship. The
-whole-file hash makes even a count-only change re-ship, which refreshes
-the bank's timestamp: a frequently-hit issue stays fresh, and one whose
-truth has drifted ages out of recency naturally. A rising `hit_count`
-on an existing memory means the memory is not landing — that is a
-system-deficiency signal, visible with
-`rg "hit_count:" <docs-repo>/ --glob '*.md'`.
+A rising `hit_count` on an existing memory means the memory is not
+landing — a system-deficiency signal (injection or retrieval is
+failing those agents), surfaced by the same documents-list query.
 
 ## If you must call the ship script yourself
 

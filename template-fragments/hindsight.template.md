@@ -127,13 +127,16 @@ verdict**, and unsure means deny. Work each proposal in order:
    differently. Anything missing → one-line bounce asking for it; no
    judgment yet.
 2. **Existing coverage — check before judging** (mechanics in the
-   `hindsight-shipping` skill): search the agent-memory docs for the
-   symptom's key terms, then one low-budget `recall` against the bank.
-   - **Fully covered** → bump the existing doc's `hit_count`, refresh
-     `updated_at`, commit, ship. The repeat report is itself a finding:
-     the memory existed and did not land, and the count records that.
-   - **Related, but adds new information** → merge it into the existing
-     doc (same `id`), bump `hit_count`, refresh `updated_at`, ship.
+   `hindsight-shipping` skill): one low-budget `recall` scoped to the
+   reported rig, plus a check of existing agent memories
+   (`kind: agent-memory` in the documents list).
+   - **Fully covered** → `memory-retain.sh --bump <id>`: increments
+     `hit_count`, refreshes the report line and the bank timestamp. The
+     repeat report is itself a finding: the memory existed and did not
+     land, and the count records that.
+   - **Related, but adds new information** → merge the new facts into
+     the content and `--bump` with the merged content — same
+     `document_id`, count and timestamp refreshed.
    - **No match** → the four gates decide.
 3. **The four gates — ALL must pass; a gate you are unsure about
    fails:**
@@ -151,10 +154,11 @@ verdict**, and unsure means deny. Work each proposal in order:
 4. **Routing beats retaining.** If the root cause is a doc that
    affirmatively says the wrong thing, mail the owning rig to fix the
    doc instead of accepting — the bank converges on the corrected doc.
-5. **Accept** → author the doc yourself in the platform docs repo
-   (usually `type: gotcha`; pick the type that fits), tag `repos:` with
-   the rigs it bites, commit, ship. Mechanics in the
-   `hindsight-shipping` skill.
+5. **Accept** → retain it with `memory-retain.sh` (usually
+   `type: gotcha`; pick the type that fits), with `repo:` tags for the
+   rigs it bites. Agent memories are bank-native — no file, no commit;
+   the script is the only write path and handles serialization.
+   Mechanics in the `hindsight-shipping` skill.
 6. **Reply one line either way** — verdict and reason. That is how
    proposers calibrate against the bar.
 {{- end}}

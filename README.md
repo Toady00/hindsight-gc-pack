@@ -35,6 +35,7 @@ hindsight bank import-template stacked-chips-v2 bank-template.json
 | `commands/ship/` | `gc` command: ship the docs manually at any point (auto-resolves roots; owns `--dry-run` for previews) |
 | `assets/scripts/ship-docs.sh` | The single ship path, **stateless** (the bank is the ledger — stamped content hashes in `document_metadata`) and **ref-based** (ships committed content of `origin/HEAD`/`HEAD`, never the working tree). Contract enforcement, hash diff, drain-before-ship, op polling, GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
+| `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
 | `skills/hindsight-memory/` | Read patterns for every agent: reflect/recall cadence, scoping, status semantics, `tag_groups` caveats |
 | `skills/hindsight-shipping/` | Write patterns for authoring agents: frontmatter contract, gates, gotcha capture |
 | `template-fragments/` | The **fragment contract**: `hindsight-brief` / `hindsight-propose` dispatchers consumers wire into any agent's prompt (see below) |
@@ -199,18 +200,56 @@ re-injects the prime into the system prompt each turn).
 ## Agent-contributed memory
 
 The pipeline for what agents learn the hard way: **proposal mail →
-arbitration → a typed doc → shipped**. Workers never write; they mail
-the archivist (`hindsight-propose` carries the format and self-filter).
-The archivist checks for existing coverage first — a repeat report bumps
-the doc's `hit_count` and refreshes `updated_at`, so the whole-file hash
-re-ships it and the bank timestamp stays fresh exactly as often as the
-issue actually bites; a rising count on an existing memory is the signal
-that the memory is not landing. New reports face four deny-biased gates
-(verified / a trap / expensive when sprung / durable —
-`hindsight-arbitrate` is the policy, the `hindsight-shipping` skill the
-mechanics). Accepted docs live in the platform docs repo, tagged
-`repos:` for the rigs they bite — `type: gotcha` today; the pipeline is
-type-agnostic and new agent-memory types are one schema-table row away.
+arbitration → bank-native retain**. Workers never write; they mail the
+archivist (`hindsight-propose` carries the format and self-filter). New
+reports face four deny-biased gates (verified / a trap / expensive when
+sprung / durable — `hindsight-arbitrate` is the policy, the
+`hindsight-shipping` skill the mechanics); accepted memories are
+retained by `memory-retain.sh` — `type: gotcha` today, and the pipeline
+is type-agnostic.
+
+The bank has two write paths, one per kind of truth:
+
+| | Docs corpus | Agent memories |
+|---|---|---|
+| Source of truth | git trees (canonical refs) | the bank itself |
+| Write path | `ship-docs.sh` sync | `memory-retain.sh` via arbitration |
+| Git involved | yes — commit is publish | no — like voice memos |
+| GONE detection | yes (`document_metadata.repo`) | exempt (`kind: agent-memory`, no repo metadata key) |
+
+Repeat reports `--bump` the memory: `hit_count` increments (metadata
+and a reader-visible `Reported N times` line in the content) and the
+re-retain refreshes the bank timestamp, so a frequently-hit issue stays
+fresh exactly as often as it actually bites while a stale one ages out
+of recency naturally. A rising count on an existing memory means the
+memory is not landing — a retrieval/injection deficiency signal,
+queryable from the documents list.
+
+Retrieval scoping is unaffected by residency: agent memories carry full
+`repo:` tags — that is how rig agents discover them.
+
+## Deleting from the bank (manual, break-glass)
+
+The pack never deletes — retire-in-place (`status: deprecated`) is the
+in-band mechanism, and the archivist's hard rules forbid destructive
+ops. But a human removing pure noise (a premature doc, a pivoted
+direction) is legitimate. The procedure differs by kind:
+
+- **Bank-native memory** (gotcha, out-of-band voice memo):
+  `hindsight document delete <bank> <doc-id>` — clean and final. No
+  file exists, nothing resurrects it.
+- **Tree-backed doc**: two halves, or it comes back.
+  1. Delete the file and commit the removal (else the next sync
+     re-ships it — the bank converges on the tree).
+  2. `hindsight document delete <bank> <doc-id>` (else the bank doc
+     lingers and the GONE report flags it every run).
+
+  Do the file first. A lingering GONE line is the "you left the job
+  half-done" reminder, by design — report-only, never auto-removed.
+
+Deletion erases the bank's copy only; anything else that referenced the
+doc id in body text keeps its dangling reference. Prefer deprecation
+whenever the history has value.
 
 ---
 
