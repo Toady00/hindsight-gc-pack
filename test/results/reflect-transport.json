@@ -1,0 +1,10 @@
+{
+  "text": "## Current transport\n\nIn the **`svc-widgets` repository / widget eventing domain**, widget-processing events currently use **Amazon SQS standard queues**, with one queue per event class:\n\n- `widgets-ingest`\n- `widgets-process`\n- `widgets-publish`\n\nThe accepted specification is `spec.eventing.transport.0001`. Its associated requirements include a DLQ on every queue with `maxReceiveCount: 5`, a `90 seconds` visibility timeout, JSON message bodies with the required `event_version` field currently set to `\"2\"`, and idempotent consumers because delivery is at-least-once.\n\n## Is it changing?\n\n**Not currently.** As of **August 20, 2026**, the proposed “Move Widget Event Transport to EventBridge” document is explicitly **DRAFT — proposal only**. It has not been reviewed or accepted, so it does not change the current implementation or supersede the SQS decision.\n\nIf eventually accepted, the proposal would replace the current topology with an EventBridge bus named `widgets-events`, using rule-based routing, while retaining per-consumer SQS queues as targets. The proposal is motivated by consumer-onboarding friction in the current three-queue design.\n\nSeveral points remain unresolved before that could become a decision:\n\n- EventBridge cost at the current event volume versus three flat queues.\n- Whether `event_version` moves into `detail-type` or remains in the event body.\n- Whether migration uses a dual-publish window or a hard cutover.\n\nThe draft also proposes `maxReceiveCount: 3` for EventBridge rule-target queues, down from the accepted current value of `maxReceiveCount: 5`; that proposed value is **not** production configuration.",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 38718,
+    "output_tokens": 974,
+    "thoughts_tokens": 0,
+    "total_tokens": 39692
+  }
+}

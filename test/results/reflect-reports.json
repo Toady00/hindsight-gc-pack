@@ -1,0 +1,10 @@
+{
+  "text": "## Current decision — `svc-reports`\n\nGenerated reports are stored as **structured JSON documents in Amazon S3**:\n\n```text\ns3://reports/{company}/{report_id}.json\n```\n\nThey use schema version **`report.v2`**.\n\nThe **structured JSON document is the source of truth** for each report. At publish time, HTML is generated from that JSON and stored beside it as:\n\n```text\n{report_id}.html\n```\n\nHTML is therefore a **derived, reproducible presentation artifact**; readers do not render it on read. Report regeneration replaces the JSON and HTML artifacts atomically.\n\nFor numeric metrics, the accepted `svc-reports` storage decision requires the JSON to include the metric’s **value**, **unit**, and a **`source_ref`** to the upstream fact used to compute it. Schema changes require explicit version increments, and readers must reject unknown schema versions.\n\n## Historical distinction\n\nThe earlier `svc-reports` decision stored Markdown at `s3://reports/{company}/{report_id}.md` and rendered HTML on read. That decision is explicitly **superseded** by `adr.storage.report-format.0002` and is historical, not current. HTML was rejected as the source of truth because it is a presentation format, and Markdown plus a sidecar metrics file was rejected because separate artifacts could disagree.",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 33690,
+    "output_tokens": 891,
+    "thoughts_tokens": 0,
+    "total_tokens": 34581
+  }
+}

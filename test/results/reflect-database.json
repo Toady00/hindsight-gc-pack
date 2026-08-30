@@ -1,0 +1,10 @@
+{
+  "text": "## Current database standard\n\nFor the **platform-wide service-datastore convention** (accepted 2026-07-20), the database is **PostgreSQL 16** for every service datastore.\n\nThe convention’s full ranking and exceptions are:\n\n1. **PostgreSQL 16** — the default for every service datastore; no exception without an accepted ADR.\n2. **SQLite** — permitted only for embedded tooling and local-development fixtures; never for a service datastore.\n3. **MySQL** — an explicit anti-preference: it is not used unless a vendor dependency cannot run against PostgreSQL **and** an accepted ADR authorizes the exception.\n\nAny other exception, including an analytics-specific database, requires its own accepted ADR. The standard service setup also calls for one PostgreSQL instance per service and prohibits shared databases between services.\n\n## Analytics exception or proposed change\n\nThere is **no accepted analytics-specific exception** in the record.\n\nA **2026-08-22 owner voice memo** describes exploratory thinking—not a decision—to use **DuckDB** for the analytics side. The proposed shape is for DuckDB to read report JSON directly from **Amazon S3**, rather than loading all report data into PostgreSQL first, while retaining PostgreSQL for the services layer. The motivation is that wide aggregations over essentially columnar report data have been painful in PostgreSQL.\n\nThat proposal remains unresolved: cost, resource implications, compatibility with the existing Terraform setup, and practical suitability had not been evaluated. Therefore, PostgreSQL remains the settled choice for the services layer, while the analytics design is open and would require an accepted ADR before becoming a platform exception.",
+  "usage": {
+    "cached_tokens": 0,
+    "input_tokens": 36467,
+    "output_tokens": 886,
+    "thoughts_tokens": 0,
+    "total_tokens": 37353
+  }
+}

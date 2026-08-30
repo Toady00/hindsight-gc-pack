@@ -1,0 +1,345 @@
+{
+  "entities": {
+    "event_version": {
+      "canonical_name": "event_version",
+      "entity_id": "c7d43d2a-a81f-4c77-b297-597d2ba08704",
+      "observations": []
+    },
+    "event body": {
+      "canonical_name": "event body",
+      "entity_id": "14d43171-3fc9-4404-b0ec-09287c47665f",
+      "observations": []
+    },
+    "review": {
+      "canonical_name": "review",
+      "entity_id": "e1eb4eb8-a326-4e25-a778-d6e912efb027",
+      "observations": []
+    },
+    "detail-type": {
+      "canonical_name": "detail-type",
+      "entity_id": "666c37e6-2cfb-4bb3-83b0-39db53427a97",
+      "observations": []
+    },
+    "SQS standard queues": {
+      "canonical_name": "SQS standard queues",
+      "entity_id": "aa1f4c00-1e64-4936-9712-306614aa5c7d",
+      "observations": []
+    },
+    "svc-widgets": {
+      "canonical_name": "svc-widgets",
+      "entity_id": "9c1052d7-f5a8-47f0-b630-cee6b76be9da",
+      "observations": []
+    },
+    "supersession": {
+      "canonical_name": "supersession",
+      "entity_id": "ecd3ce3b-9f51-406a-8901-03d39fc3e1fd",
+      "observations": []
+    },
+    "rule-based routing": {
+      "canonical_name": "rule-based routing",
+      "entity_id": "550c7dc6-e74f-44cb-98a1-c4d0010b2002",
+      "observations": []
+    },
+    "event class": {
+      "canonical_name": "event class",
+      "entity_id": "b4e6fca1-f07e-4655-b088-5149bc7b28a9",
+      "observations": []
+    },
+    "dual-publish window": {
+      "canonical_name": "dual-publish window",
+      "entity_id": "4e89f273-260f-4556-98a0-7ecc0165b2d8",
+      "observations": []
+    },
+    "event contract": {
+      "canonical_name": "event contract",
+      "entity_id": "4e8a5bad-d19a-4b40-bbfe-818267504910",
+      "observations": []
+    },
+    "queue fan-out plumbing": {
+      "canonical_name": "queue fan-out plumbing",
+      "entity_id": "087d0f77-fbf6-41f2-a92b-3fdbbce53e95",
+      "observations": []
+    },
+    "DRAFT": {
+      "canonical_name": "DRAFT",
+      "entity_id": "f4888d13-0cc6-43cb-bce3-ce5f524817a0",
+      "observations": []
+    },
+    "EventBridge": {
+      "canonical_name": "EventBridge",
+      "entity_id": "1d3d9040-d1e0-4e1f-bc85-4c0eb90b8e04",
+      "observations": []
+    },
+    "current event volume": {
+      "canonical_name": "current event volume",
+      "entity_id": "0af9b3a4-5391-4e65-9002-f4f5d31a5fab",
+      "observations": []
+    },
+    "event consumers": {
+      "canonical_name": "event consumers",
+      "entity_id": "93d15752-af5a-489e-90e5-d4377183339e",
+      "observations": []
+    },
+    "consumer onboarding": {
+      "canonical_name": "consumer onboarding",
+      "entity_id": "abe4e908-ef9c-4ea0-8dfb-56aff3294ac1",
+      "observations": []
+    },
+    "event patterns": {
+      "canonical_name": "event patterns",
+      "entity_id": "f101bc5d-cc50-4f3d-819a-5cb614da5d4f",
+      "observations": []
+    },
+    "migration sequencing": {
+      "canonical_name": "migration sequencing",
+      "entity_id": "e467c124-cc21-4fef-b9e5-60aff3073904",
+      "observations": []
+    },
+    "schema": {
+      "canonical_name": "schema",
+      "entity_id": "85c2d886-e3cf-4788-80ed-0ddfff852d9f",
+      "observations": []
+    },
+    "widgets-events": {
+      "canonical_name": "widgets-events",
+      "entity_id": "5f6a05b1-302e-4c80-bdb6-accb166200ea",
+      "observations": []
+    },
+    "SQS": {
+      "canonical_name": "SQS",
+      "entity_id": "f8d96209-c695-49ba-9ca4-00c1eba18a63",
+      "observations": []
+    },
+    "architectural decision": {
+      "canonical_name": "architectural decision",
+      "entity_id": "a0740754-aab5-4e89-afe6-1f7bad8fbf62",
+      "observations": []
+    },
+    "acceptance": {
+      "canonical_name": "acceptance",
+      "entity_id": "1715c94b-b2ad-490a-8349-dc4ab4844d60",
+      "observations": []
+    },
+    "three SQS queues": {
+      "canonical_name": "three SQS queues",
+      "entity_id": "1ec3eb7f-0057-469a-803b-e22857afd34e",
+      "observations": []
+    },
+    "event producers": {
+      "canonical_name": "event producers",
+      "entity_id": "5d4f6094-edc0-4d2c-9de7-981502c2b943",
+      "observations": []
+    },
+    "domain eventing": {
+      "canonical_name": "domain eventing",
+      "entity_id": "4a5420e3-085d-431b-aea4-62e212ace396",
+      "observations": []
+    },
+    "consumer groups": {
+      "canonical_name": "consumer groups",
+      "entity_id": "5e3a110a-bc0c-4f31-af7b-f168c41e1342",
+      "observations": []
+    },
+    "platform direction": {
+      "canonical_name": "platform direction",
+      "entity_id": "d5a59a60-1ef7-4226-bf81-221f293b5374",
+      "observations": []
+    },
+    "spec.eventing.transport.0001": {
+      "canonical_name": "spec.eventing.transport.0001",
+      "entity_id": "297c0638-ce0d-432d-ad42-f6d75515e717",
+      "observations": []
+    },
+    "consumer-side filtering": {
+      "canonical_name": "consumer-side filtering",
+      "entity_id": "e4925ea9-5f94-4d5b-8b2d-43d1ca4d98b5",
+      "observations": []
+    },
+    "hard cutover": {
+      "canonical_name": "hard cutover",
+      "entity_id": "56a223f3-fb42-4d88-900f-1567e4dd6336",
+      "observations": []
+    }
+  },
+  "results": [
+    {
+      "chunk_id": "stacked-chips-v2-test_adr.eventing.transport-eventbridge.0001_0",
+      "context": "adr: Move Widget Event Transport to EventBridge — domain eventing, repo svc-widgets; DRAFT, a proposal subject to change, not current platform direction",
+      "document_id": "adr.eventing.transport-eventbridge.0001",
+      "entities": [
+        "EventBridge",
+        "spec.eventing.transport.0001",
+        "domain eventing",
+        "svc-widgets",
+        "architectural decision",
+        "platform direction",
+        "DRAFT",
+        "SQS"
+      ],
+      "id": "888a2a1a-940f-49e9-86d6-3f1a1d9f66d2",
+      "mentioned_at": "2026-08-20T15:30:00+00:00",
+      "metadata": {},
+      "scores": {
+        "final": 1.093324081153444,
+        "keyword": 1.7000000476837158,
+        "reranker": 0.99665654,
+        "semantic": 0.3614093334670572
+      },
+      "tags": [
+        "scope:platform",
+        "source:agent",
+        "memory_type:adr",
+        "status:draft",
+        "repo:svc-widgets",
+        "domain:eventing"
+      ],
+      "text": "The document \"Move Widget Event Transport to EventBridge\" is explicitly marked \"DRAFT — proposal only\". No transport decision has been made in this document, and the accepted transport remains SQS under `spec.eventing.transport.0001`. The document does not change the current implementation or platform direction. | When: As of Thursday, August 20, 2026 at 15:30:00 UTC; no decision date beyond the document's Event Date is specified. | Involving: The `svc-widgets` repository, its event producers, its event consumers, the current SQS-based platform transport, and the authors/reviewers of the draft proposal. No individual people are named. | This status is operationally significant because the proposal must not be implemented as an accepted architectural decision: SQS remains the authoritative and accepted transport, the proposal is subject to change, and the document has not been reviewed. Nothing in the document should be treated as decided or as representing current platform direction.",
+      "type": "world"
+    },
+    {
+      "chunk_id": "stacked-chips-v2-test_adr.eventing.transport-eventbridge.0001_0",
+      "context": "adr: Move Widget Event Transport to EventBridge — domain eventing, repo svc-widgets; DRAFT, a proposal subject to change, not current platform direction",
+      "document_id": "adr.eventing.transport-eventbridge.0001",
+      "entities": [
+        "acceptance",
+        "EventBridge",
+        "spec.eventing.transport.0001",
+        "domain eventing",
+        "svc-widgets",
+        "platform direction",
+        "review",
+        "supersession",
+        "SQS"
+      ],
+      "id": "18d27e69-9487-4232-9767-cc609a529616",
+      "mentioned_at": "2026-08-20T15:30:00.060000+00:00",
+      "metadata": {},
+      "scores": {
+        "final": 1.0924765017652849,
+        "keyword": 1.100000023841858,
+        "reranker": 0.9958839,
+        "semantic": 0.3524808781519553
+      },
+      "tags": [
+        "scope:platform",
+        "source:agent",
+        "memory_type:adr",
+        "status:draft",
+        "repo:svc-widgets",
+        "domain:eventing"
+      ],
+      "text": "If the proposal is accepted after review and the open questions are resolved, the EventBridge-based transport would supersede `spec.eventing.transport.0001`. At the current status, it does not supersede that specification: `spec.eventing.transport.0001` remains accepted, and the EventBridge proposal has not been reviewed. | When: Conditionally in the future if and when the proposal is accepted; as of Thursday, August 20, 2026, no acceptance has occurred and no supersession date is specified. | Involving: The platform decision-makers and reviewers responsible for accepting or rejecting the proposal; the `svc-widgets` repository; and the specifications governing its event transport. | This records the exact consequence and boundary of the draft: acceptance would replace the current transport specification, but the stated consequence is conditional rather than current. Until review and acceptance occur, implementing EventBridge as though it were authoritative would conflict with the explicitly retained SQS direction.",
+      "type": "world"
+    },
+    {
+      "chunk_id": "stacked-chips-v2-test_adr.eventing.transport-eventbridge.0001_0",
+      "context": "adr: Move Widget Event Transport to EventBridge — domain eventing, repo svc-widgets; DRAFT, a proposal subject to change, not current platform direction",
+      "document_id": "adr.eventing.transport-eventbridge.0001",
+      "entities": [
+        "queue fan-out plumbing",
+        "EventBridge",
+        "rule-based routing",
+        "event producers",
+        "widgets-events",
+        "event consumers",
+        "svc-widgets",
+        "SQS standard queues",
+        "consumer onboarding",
+        "event patterns"
+      ],
+      "id": "59eab1f7-e808-45fc-8a65-13c5b081e9d0",
+      "mentioned_at": "2026-08-20T15:30:00.020000+00:00",
+      "metadata": {},
+      "scores": {
+        "final": 1.091819074309182,
+        "keyword": 2.0,
+        "reranker": 0.9952846,
+        "semantic": 0.3009874670781547
+      },
+      "tags": [
+        "scope:platform",
+        "source:agent",
+        "memory_type:adr",
+        "status:draft",
+        "repo:svc-widgets",
+        "domain:eventing"
+      ],
+      "text": "The draft proposes replacing the SQS standard queues used for event transport with an EventBridge event bus named `widgets-events` that uses rule-based routing. Each consumer would declare an EventBridge rule matching its event patterns, allowing new consumers to attach to the event bus without requiring changes to producers. | When: As of Thursday, August 20, 2026; this is a proposed future direction, not an implemented or accepted change. | Involving: Event producers would publish to the `widgets-events` EventBridge bus; each event consumer would declare its own matching rule; EventBridge would perform rule-based routing; and per-consumer SQS queues would receive routed events as targets. | The proposal is intended to remove the current consumer-onboarding friction caused by the SQS-per-event-class design. Its central operational benefit is that a new consumer can attach by adding its own matching rule rather than modifying producers or adding queue fan-out plumbing. This remains only a proposal because the document is explicitly a draft, has not been reviewed, and contains unresolved design questions.",
+      "type": "world"
+    },
+    {
+      "chunk_id": "stacked-chips-v2-test_adr.eventing.transport-eventbridge.0001_0",
+      "context": "adr: Move Widget Event Transport to EventBridge — domain eventing, repo svc-widgets; DRAFT, a proposal subject to change, not current platform direction",
+      "document_id": "adr.eventing.transport-eventbridge.0001",
+      "entities": [
+        "queue fan-out plumbing",
+        "three SQS queues",
+        "domain eventing",
+        "event producers",
+        "consumer groups",
+        "event consumers",
+        "svc-widgets",
+        "event class",
+        "consumer-side filtering",
+        "SQS"
+      ],
+      "id": "b5240033-e426-4efd-8d72-303f52e189b8",
+      "mentioned_at": "2026-08-20T15:30:00.010000+00:00",
+      "metadata": {},
+      "scores": {
+        "final": 1.088057269864275,
+        "keyword": 1.5,
+        "reranker": 0.9918554
+      },
+      "tags": [
+        "scope:platform",
+        "source:agent",
+        "memory_type:adr",
+        "status:draft",
+        "repo:svc-widgets",
+        "domain:eventing"
+      ],
+      "text": "The current SQS-per-event-class design consists of three SQS queues with one consumer group per queue. It is experiencing friction because adding a new consumer to an existing event class requires either adding queue fan-out plumbing or implementing filtering in the consumer. | When: As of Thursday, August 20, 2026; the text describes an ongoing current-state condition and does not specify when the friction began. | Involving: Event producers, existing and prospective event consumers, the three SQS queues, and the one-consumer-group-per-queue design. No individual people are named. | This friction is the motivation for considering a different transport topology: the current design makes onboarding an additional consumer to an existing event class operationally more complex by requiring producer-side or queue-side fan-out plumbing, or by shifting event-selection responsibility to consumer-side filtering.",
+      "type": "world"
+    },
+    {
+      "chunk_id": "stacked-chips-v2-test_adr.eventing.transport-eventbridge.0001_0",
+      "context": "adr: Move Widget Event Transport to EventBridge — domain eventing, repo svc-widgets; DRAFT, a proposal subject to change, not current platform direction",
+      "document_id": "adr.eventing.transport-eventbridge.0001",
+      "entities": [
+        "current event volume",
+        "event body",
+        "EventBridge",
+        "three SQS queues",
+        "dual-publish window",
+        "event contract",
+        "hard cutover",
+        "detail-type",
+        "schema",
+        "svc-widgets",
+        "event_version",
+        "migration sequencing",
+        "SQS"
+      ],
+      "id": "973c475c-2303-40e3-b5f9-6d9e0c161913",
+      "mentioned_at": "2026-08-20T15:30:00.050000+00:00",
+      "metadata": {},
+      "scores": {
+        "final": 1.0845816050821089,
+        "keyword": 1.7000000476837158,
+        "reranker": 0.98868704,
+        "semantic": 0.3559913887221873
+      },
+      "tags": [
+        "scope:platform",
+        "source:agent",
+        "memory_type:adr",
+        "status:draft",
+        "repo:svc-widgets",
+        "domain:eventing"
+      ],
+      "text": "The proposal leaves three design questions unresolved: the cost of EventBridge at the current event volume compared with three flat queues; whether `event_version` should move into `detail-type` or remain in the event body; and whether migration should use a dual-publish window or a hard cutover. | When: As of Thursday, August 20, 2026; no resolution date is specified, and all three items remain open. | Involving: The platform and `svc-widgets` eventing decision-makers, event producers, event consumers, and reviewers would need to resolve the cost, schema-placement, and migration-strategy questions. No individual people are named. | These questions block an actionable final decision. Cost comparison affects whether the proposed transport is economically acceptable; placement of `event_version` affects the event contract and routing/schema semantics; and the choice between a dual-publish window and a hard cutover determines migration risk, compatibility handling, and sequencing.",
+      "type": "world"
+    }
+  ]
+}
