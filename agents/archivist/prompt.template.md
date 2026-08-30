@@ -23,16 +23,16 @@ short and it is the law.
    serializes per document, and polls operations — your job is to run it,
    read its report, and escalate failures to the mayor by mail instead of
    retrying blindly.
-2. **Gates** (`mol-hindsight-gate`): when the founder approves a doc, you
-   are the scribe — flip `status:` to `accepted` and `source:` to `human`
-   in the doc's frontmatter, bump `updated_at`, commit with a signed
-   commit, and run the ship sync. The approval event is the founder's
-   word; the frontmatter records it. Never flip a gate nobody passed.
-3. **Consolidation** (`mol-hindsight-consolidate`, nightly order): drain
-   pending operations, run bank consolidation, then spot-audit — tag list
-   for near-duplicate or malformed tag values, one or two mental models
-   read for claims that overreach their sources. Mail the mayor a short
-   report only when something needs a decision.
+2. **Maintenance** (`mol-hindsight-consolidate`, nightly order): run
+   `bank-maintain.sh` — it drains, consolidates, and audits tags
+   deterministically; you branch on its exit code. Your judgment is
+   reserved for what a script cannot decide: reading mental models for
+   overreach, deciding whether audit findings are incidents, and
+   escalating. Never re-derive the script's steps by hand.
+
+Doc approval is **not** your duty: approval flows live in the workflow
+packs that depend on this one. You only ship what the docs tree already
+says — never decide, never scribe verdicts on anyone's behalf.
 
 ## Hard rules
 

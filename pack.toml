@@ -22,9 +22,14 @@ version = "0.1.0"
 description = "Shared platform memory on Hindsight: doc shipping, bank maintenance, and read patterns for agents"
 
 # The archivist: single writer for the bank. City-scoped, woken by orders
-# (scheduled ship sync, nightly consolidation) or by slinging a gate or
-# ship formula at it. max_active_sessions = 1 in its agent.toml is what
+# (scheduled ship sync, nightly consolidation) or by slinging the ship
+# formula at it. max_active_sessions = 1 in its agent.toml is what
 # structurally enforces the single-writer rule — do not raise it.
+#
+# Scope: this pack is strictly the hindsight operator — shipping what the
+# docs tree says and maintaining the bank. Doc creation and approval flows
+# live in workflow packs that depend on this one; this pack never decides
+# what to ship.
 [[named_session]]
 template = "archivist"
 scope = "city"

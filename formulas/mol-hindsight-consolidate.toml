@@ -1,14 +1,16 @@
 description = """
 Nightly bank maintenance: drain, consolidate, audit.
 
+The mechanical work is one deterministic script (bank-maintain.sh): drain
+in-flight operations, consolidate with recover+retry, and a tag audit
+(axis check, contract vocabulary, rig registry, domain vocab, case-split
+and Levenshtein near-duplicate detection). The agent's job is only what a
+script cannot decide: reading mental models for overreach, judging whether
+findings are incidents, and escalating.
+
 Consolidation is scheduled, not per-ship: it took ~160s on a 6-doc test
 corpus, so running it after every ship does not scale. Ship continuously,
-consolidate nightly, accept that observations lag raw memories by hours —
-raw recall is immediate; synthesis is a daily paper, not a ticker.
-
-The audit half exists because synthesis occasionally over-connects (a
-draft's date was once reported as the accepted spec being 'reaffirmed').
-Directives keep such drift attributed, but spot-audits are the backstop.
+consolidate nightly, accept that observations lag raw memories by hours.
 """
 formula = "mol-hindsight-consolidate"
 version = "0.1.0"
@@ -25,67 +27,57 @@ description = "Space-separated mental model ids to spot-audit this run (rotate o
 default = "conventions-and-standards landmines"
 
 [[steps]]
-id = "drain"
-title = "Verify no operations are in flight"
+id = "maintain"
+title = "Run deterministic maintenance"
 description = """
-List operations for {{bank}} and count non-terminal statuses (pending /
-processing). If any exist, wait and re-check (10s intervals, up to 10
-minutes). Consolidating while extractions are in flight bakes a partial
-corpus into observations. If operations are still pending after the wait,
-skip consolidation this run and note why in the bead — never consolidate
-over a moving corpus.
+Run the maintenance script and capture its report in the bead notes:
 
-Redirect all CLI output to files and extract fields with jq — never dump
-raw hindsight output into your context (operation lists can be large).
-"""
+    {{.ConfigDir}}/assets/scripts/bank-maintain.sh --bank {{bank}}
 
-[[steps]]
-id = "consolidate"
-title = "Run consolidation"
-needs = ["drain"]
-description = """
-Run `hindsight bank consolidate {{bank}} --wait`. On failure, run
-`hindsight bank consolidation-recover {{bank}}` once, retry once, and if it
-fails again mail the mayor with the error rather than looping.
-"""
+Branch on its exit code — the script has already done the work; do not
+re-derive its steps by hand:
 
-[[steps]]
-id = "tag-audit"
-title = "Audit tag hygiene"
-needs = ["consolidate"]
-description = """
-Fetch the tag list (`hindsight -o json tag list {{bank}} --limit 500`,
-redirected to a file). Check for: values outside the six axes
-(scope/repo/domain/memory_type/source/status), near-duplicate or
-casing-split values (domain:billing vs domain:Billing), repo: values that
-match no rig in `gc rig list`, and status/source values outside the
-contract's vocabulary. Malformed tags mean a writer bypassed the shipper —
-that is an incident, not a cleanup task: identify the writer, mail the
-mayor. Fixes happen at the source (correct the doc, re-ship), never by
-editing memories.
+- 0: clean. Continue.
+- 2: consolidated fine, tag audit has findings (listed on stdout, tagged
+  UNKNOWN-AXIS / BAD-VALUE / UNKNOWN-RIG / NEW-DOMAIN / CASE-SPLIT /
+  NEAR-DUP). Malformed or misspelled tags mean a writer bypassed the
+  shipper — treat as an incident: identify the writer, mail the mayor with
+  the finding lines. Fixes happen at the source (correct the doc, re-ship),
+  never by editing memories. NEW-DOMAIN alone may be legitimate vocabulary
+  growth — judge before escalating.
+- 3: drain timeout — operations still in flight; consolidation was not
+  run. Note it in the bead and stop (the next nightly run will catch up);
+  mail the mayor only if this is the second consecutive timeout.
+- 4: consolidation failed after recover+retry. Mail the mayor with the
+  error output. Do not loop.
 """
 
 [[steps]]
 id = "model-audit"
 title = "Spot-audit mental models"
-needs = ["consolidate"]
+needs = ["maintain"]
 description = """
-For each id in {{audit_models}}: fetch it (redirect to file, read only
-.content), and check its claims against what you know the corpus
-establishes — flag claims that name decisions, dates, or reaffirmations no
+Skip this step unless maintain exited 0 or 2 (consolidation actually ran).
+
+Create a scratch dir (`TMP=$(mktemp -d)`) — every API response lands under
+it, reaped on reboot, never dumped raw into your context. For each id in
+{{audit_models}}: fetch it
+(`hindsight -o json mental-model get {{bank}} <id> > "$TMP/<id>.json"`),
+read only `.content` via jq — a mental-model response can be 100x larger
+than its readable content — and check its claims against what the corpus
+establishes. Flag claims that name decisions, dates, or reaffirmations no
 document made, or that promote a draft/voice-memo position to platform
-fact. You are reading for overreach, not completeness. Note findings in
-the bead; mail the mayor only if a model is asserting something materially
-wrong.
+fact. You are reading for overreach, not completeness. Mail the mayor only
+if a model asserts something materially wrong.
 """
 
 [[steps]]
 id = "report"
 title = "Close out"
-needs = ["tag-audit", "model-audit"]
+needs = ["model-audit"]
 description = """
-Write a terse summary to bead notes: consolidation duration, tag audit
-result (clean / findings), model audit result (clean / findings). Mail the
-mayor only when something needs a human or coordinator decision. A clean
-night closes silently.
+Write a terse summary to bead notes: the script's final status line
+(drain/consolidate/audit_findings), and the model audit result (clean /
+findings). Mail the mayor only when something needs a human or coordinator
+decision. A clean night closes silently.
 """

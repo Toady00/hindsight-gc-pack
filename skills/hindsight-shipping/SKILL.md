@@ -55,16 +55,24 @@ Rules that bite:
   (frontmatter is stripped at ship; body text is what survives into
   memory).
 
-## Gates
+## Recording approval — the contract rules
 
-Approval is conversational; recording it is the archivist's job. When the
-founder approves a doc, route `mol-hindsight-gate` to the archivist with
-`doc_path`, `verdict`, and `approved_by` (who + traceable venue). Never
-flip `status: accepted` + `source: human` yourself on a human's behalf.
+*How* approval happens (gates, reviews, sign-off flows) belongs to your
+workflow pack, not this one. This pack only defines what a recorded
+verdict must look like in frontmatter:
 
-Trusted workflows that are explicitly permitted to accept their own specs
-set `status: accepted` + `source: agent` — that pair means exactly
-"standing position, never human-reviewed."
+- A human approving a revision sets `status: accepted` **and**
+  `source: human` together, bumps `updated_at`, commits, and ships (the
+  `ship` command, or let the hourly sync catch it).
+- Only record an approval a human actually gave, with traceable
+  provenance. Never infer one.
+- Revising a human-approved doc reverts `source:` to `agent` (and
+  `status:` to `draft` unless your workflow is trusted to re-accept).
+- Trusted workflows explicitly permitted to accept their own specs set
+  `status: accepted` + `source: agent` — that pair means exactly
+  "standing position, never human-reviewed."
+- Rejection is not a status: the doc simply stays `draft`; feedback lives
+  in your workflow's work tracking, not in frontmatter.
 
 ## Gotcha capture — the one direct-write exception
 
