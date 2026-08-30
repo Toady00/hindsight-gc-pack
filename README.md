@@ -29,11 +29,12 @@ hindsight bank import-template stacked-chips-v2 bank-template.json
 | `pack.toml` | Pack manifest; declares the `archivist` city session |
 | `agents/archivist/` | The bank's **single writer**. `max_active_sessions = 1` structurally enforces write serialization |
 | `formulas/mol-hindsight-ship.toml` | Reconcile docs trees → bank (validate, ship changed, poll to terminal) |
-| `formulas/mol-hindsight-gate.toml` | Record a human approval: flip `status`/`source`, signed commit, sync |
 | `formulas/mol-hindsight-consolidate.toml` | Nightly: drain ops, consolidate, tag audit, mental-model spot-audit |
 | `orders/ship-sync.toml` | Hourly convergence backstop — makes all other ship triggers non-load-bearing |
 | `orders/consolidate.toml` | Nightly consolidation + audit |
-| `assets/scripts/ship-docs.sh` | The single ship path: contract enforcement, change detection, per-doc serialization, op polling |
+| `commands/ship/` | `gc` command: ship the docs manually at any point (auto-resolves roots; owns `--dry-run` for previews) |
+| `assets/scripts/ship-docs.sh` | The single ship path, **stateless** (the bank is the ledger — stamped content hashes in `document_metadata`) and **ref-based** (ships committed content of `origin/HEAD`/`HEAD`, never the working tree). Contract enforcement, hash diff, drain-before-ship, op polling, GONE reports |
+| `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `skills/hindsight-memory/` | Read patterns for every agent: reflect/recall cadence, scoping, status semantics, `tag_groups` caveats |
 | `skills/hindsight-shipping/` | Write patterns for authoring agents: frontmatter contract, gates, gotcha capture |
 | `test/` | Rehearsal harness: dummy docs + validated prototype shipper + probe results from the 2026-08-25 live experiment |
@@ -48,6 +49,40 @@ source = "../hindsight"
 referenced from `workspace.pack` so the archivist expands city-scoped.
 Rig agents need no sessions from this pack — they consume the two skills.
 
+## The shipping contract
+
+The pack's public promise to any doc producer — platform docs, someone
+else's docs, any schema — is four rules:
+
+1. **Publish.** Put a doc with conforming frontmatter on your publish
+   boundary — the canonical branch of a walked docs tree. It ships within
+   the order interval (or immediately via the `ship` command).
+2. **Revise.** Change it there and it re-ships, replacing its previous
+   self in the bank (`document_id` replace). Change detection is a content
+   hash of the whole file, so *any* change ships — frontmatter included.
+3. **Retire.** Edit the doc to say it is dead (in this platform's schema:
+   `status: superseded` or `deprecated`) and leave the file in place. It
+   re-ships as its own tombstone. Nothing is ever deleted from the bank;
+   a file that vanishes gets a GONE report, never a removal.
+4. **Everything else is not this pack's business.** What "draft" means,
+   who approves, when status flips — that belongs to your doc schema and
+   your workflow pack, and reaches this pack only as content changes.
+
+Lifecycle policy is expressed by **where you commit**, not by pack
+configuration. A draft you want visible platform-wide goes on the
+canonical branch with `status: draft`; a draft not ready for anyone stays
+on a private branch, invisible to the pack by construction. Branch =
+privacy. Status = epistemic standing of published content. The pack has
+no opinion and no knob.
+
+> The walker reads the **committed content of each root's canonical ref**
+> (`--ref` override → `origin/HEAD` → local `HEAD`), never the working
+> tree — a branch switch or dirty worktree at order time cannot leak
+> unpublished content into the bank, and untracked files are simply
+> unpublished. A root outside any git repo falls back to walking the
+> filesystem, so git is the recommended publish boundary, not a
+> requirement.
+
 **Status:** the bank design, retain contract, shipper logic, and query
 patterns are validated against a live test bank (see `test/results/`).
 The Gas City wiring — order scheduling, pool routing to the archivist,
@@ -60,6 +95,14 @@ immediacy, never load-bearing — add per-repo later if wanted), bulk
 backfill automation (rehearse via `test/` + `rebuild.md` instead), and any
 per-rig session or per-repo mental models (per-repo observation scopes
 already provide that lens).
+
+Known coupling, planned split: the stacked-chips doc schema (the `type`
+table, status/source/scope vocabularies, and tag derivation from
+`repos`/`domains`) is currently hard-coded in `ship-docs.sh`. The
+intended end-state is a pluggable schema layer — the pack core owns the
+universal mechanics (ref walk, hash diff, drain, metadata stamping, GONE)
+and ships whatever tags the schema derives, without interpreting them;
+`document_metadata` stays the pack's private bookkeeping either way.
 
 ---
 
