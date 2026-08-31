@@ -39,7 +39,7 @@ extraction and apply forward-only (see "Two properties worth knowing").
 | `formulas/mol-hindsight-consolidate.toml` | Nightly: audit first (tags, config drift, mental-model overreach), consolidation as ensure-and-wait backstop — auto-consolidation handles freshness |
 | `orders/ship-sync.toml` | Hourly convergence backstop — makes all other ship triggers non-load-bearing |
 | `orders/consolidate.toml` | Nightly audit + consolidation backstop |
-| `commands/ship/` | `gc` command: ship the docs manually at any point (auto-resolves roots; owns `--dry-run` for previews) |
+| `commands/ship/` | `gc <binding> ship` — ship the docs manually at any point (auto-resolves roots; owns `--dry-run` for previews). Pack commands are namespaced by the import binding, so `[imports.hindsight]` makes it `gc hindsight ship` |
 | `assets/scripts/ship-docs.sh` | The docs-corpus ship path, **stateless** (the bank is the ledger — stamped content hashes in `document_metadata`) and **ref-based** (ships committed content of `origin/HEAD`/`HEAD`, never the working tree). Schema-driven validation, hash diff, drain-before-ship, op polling, GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
@@ -80,8 +80,10 @@ Every path in one place. Details for each live in the sections below.
 Write markdown with the frontmatter contract (see the
 `hindsight-shipping` skill), put it in a walked docs tree, commit to the
 canonical branch. Commit **is** publish; it ships within the hour.
-Impatient or previewing: `gc ship` / `gc ship --dry-run`. Revise by
-editing in place; retire with `status: deprecated` — never delete.
+Impatient or previewing: `gc hindsight ship` / `gc hindsight ship
+--dry-run` (the first word after `gc` is your import binding name).
+Revise by editing in place; retire with `status: deprecated` — never
+delete.
 
 **Reading agent — query memory:**
 
@@ -110,7 +112,7 @@ per run — see "The schema layer".
 
 **Different conventions entirely:**
 
-`ship --schema schemas/null` reads raw `hindsight:` frontmatter blocks —
+`gc hindsight ship --schema schemas/null` reads raw `hindsight:` frontmatter blocks —
 no vocabulary, no protection, you own the invariants. One schema per
 run; different dialects belong in different cities and banks.
 
