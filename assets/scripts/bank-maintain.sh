@@ -10,12 +10,12 @@
 #   --bank <id>            bank to maintain (default: $HINDSIGHT_BANK;
 #                          no hardcoded fallback — every city declares its
 #                          own bank in [workspace] env)
-#   --api <url>            Hindsight API base (default: $HINDSIGHT_API or prod)
+#   --api <url>            Hindsight API base (default: $HINDSIGHT_API, else ~/.hindsight/config api_url; never a hardcoded server)
 #   --domains <file>       known-domains file, one per line (audit check d)
 #   --schema <dir>         schema directory whose audit-vocab.json defines
 #                          the tag axes and closed vocabularies (default:
 #                          $HINDSIGHT_SCHEMA, else the pack's
-#                          schemas/stacked-chips). Write-side dialect and
+#                          schemas/docs). Write-side dialect and
 #                          audit vocabulary are one artifact — they cannot
 #                          drift. A schema with no audit-vocab.json gets
 #                          structural checks only (c/e).
@@ -44,7 +44,15 @@
 
 set -euo pipefail
 
-API="${HINDSIGHT_API:-https://hindsight-api.brandondennis.me}"
+# API resolution: --api → $HINDSIGHT_API → the hindsight CLI's own config
+# (~/.hindsight/config api_url) → loud refusal. No hardcoded server.
+api_from_cli_config() {
+  local cfg="${HINDSIGHT_CONFIG:-$HOME/.hindsight/config}"
+  [[ -f "$cfg" ]] || return 0
+  sed -n 's/^[[:space:]]*api_url[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$cfg" | head -1
+}
+
+API="${HINDSIGHT_API:-}"
 BANK=""
 DOMAINS_FILE=""
 SCHEMA_DIR=""
@@ -64,9 +72,11 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$BANK" ]] || BANK="${HINDSIGHT_BANK:-}"
 [[ -n "$BANK" ]] || { echo "no bank: set HINDSIGHT_BANK in [workspace] env, or pass --bank <id>" >&2; exit 64; }
+[[ -n "$API" ]] || API="$(api_from_cli_config)"
+[[ -n "$API" ]] || { echo "no API: set HINDSIGHT_API, configure api_url in ~/.hindsight/config, or pass --api <url>" >&2; exit 64; }
 
 PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-[[ -n "$SCHEMA_DIR" ]] || SCHEMA_DIR="${HINDSIGHT_SCHEMA:-$PACK_DIR/schemas/stacked-chips}"
+[[ -n "$SCHEMA_DIR" ]] || SCHEMA_DIR="${HINDSIGHT_SCHEMA:-$PACK_DIR/schemas/docs}"
 VOCAB="$SCHEMA_DIR/audit-vocab.json"
 [[ -f "$VOCAB" ]] || VOCAB=""
 

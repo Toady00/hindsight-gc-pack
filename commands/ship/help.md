@@ -22,7 +22,7 @@ Also honors `--api`, `--ref`, `--domains`, `--schema`, `--drain-timeout`
 (see `assets/scripts/ship-docs.sh` header) and `HINDSIGHT_BANK` /
 `HINDSIGHT_API` / `HINDSIGHT_SCHEMA` environment variables. The schema —
 which frontmatter dialect the walked docs speak — defaults to the pack's
-`schemas/stacked-chips`; one schema per run, per-city by design.
+`schemas/docs`; one schema per run, per-city by design.
 
 The shipper is **stateless**: the bank itself is the ledger (each retain
 stamps a content hash the differ reads back), so this command computes the

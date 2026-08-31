@@ -1,17 +1,19 @@
-# Hindsight — `stacked-chips-v2`
+# Hindsight memory pack
 
-The memory-bank design for the Stacked Chips platform — and the **Gas City
-pack** that operates it. One bank spanning every repository and domain,
-scoped down to a single rig on demand; a city-scoped archivist as the
-bank's single writer.
+Shared platform memory on Hindsight, as a **Gas City pack** — a building
+block for OMG, platform-agnostic by design. One bank spanning every
+repository and domain, scoped down to a single rig on demand; a
+city-scoped archivist as the bank's single writer.
 
-Built against Hindsight **0.9.1**, server `https://hindsight-api.brandondennis.me`.
+Built against Hindsight **0.9.1**. No server is ever defaulted: the API
+resolves `--api` → `$HINDSIGHT_API` → the hindsight CLI's own config
+(`~/.hindsight/config` `api_url`) → loud refusal.
 
 ## Design documents
 
-Stacked-chips-local working notes — deliberately **not tracked in the
-pack repo** (a fresh clone will not have them; they describe this
-platform's bank, not the pack):
+Deployment-local working notes — deliberately **not tracked in the
+pack repo** (a fresh clone will not have them; they describe one
+deployment's bank, not the pack):
 
 | File | Purpose |
 |---|---|
@@ -22,8 +24,8 @@ platform's bank, not the pack):
 | `rebuild.md` | Teardown, rebuild, bulk load, maintenance, cost map. |
 
 ```bash
-hindsight bank import-template stacked-chips-v2 bank-template.json --dry-run
-hindsight bank import-template stacked-chips-v2 bank-template.json
+hindsight bank import-template <bank> bank-template.json --dry-run
+hindsight bank import-template <bank> bank-template.json
 ```
 
 ## The pack
@@ -40,9 +42,9 @@ hindsight bank import-template stacked-chips-v2 bank-template.json
 | `assets/scripts/ship-docs.sh` | The docs-corpus ship path, **stateless** (the bank is the ledger — stamped content hashes in `document_metadata`) and **ref-based** (ships committed content of `origin/HEAD`/`HEAD`, never the working tree). Schema-driven validation, hash diff, drain-before-ship, op polling, GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
-| `schemas/` | Pluggable doc dialects: `stacked-chips` (this platform's frontmatter contract, the default) and `null` (raw passthrough). Each is `derive` + `audit-vocab.json` — see "The schema layer" |
+| `schemas/` | Pluggable doc dialects: `docs` (the pack's frontmatter contract, the default) and `null` (raw passthrough). Each is `derive` + `audit-vocab.json` — see "The schema layer" |
 | `skills/hindsight-memory/` | Read patterns for every agent: reflect/recall cadence, scoping, status semantics, `tag_groups` caveats |
-| `skills/hindsight-shipping/` | Write patterns: frontmatter contract (stacked-chips dialect), approval recording, agent-contributed memory mechanics |
+| `skills/hindsight-shipping/` | Write patterns: frontmatter contract (the default `docs` dialect), approval recording, agent-contributed memory mechanics |
 | `template-fragments/` | The **fragment contract**: `hindsight-brief` / `hindsight-propose` / `hindsight-arbitrate` dispatchers consumers wire into agents' prompts (see below) |
 | `test/` | Rehearsal harness: dummy docs + validated prototype shipper + probe results from the 2026-08-25 live experiment |
 
@@ -188,8 +190,8 @@ the same directory, so write-side dialect and audit vocabulary are one
 artifact and cannot drift.
 
 Selection: `--schema <dir>` → `$HINDSIGHT_SCHEMA` → the pack's default,
-`schemas/stacked-chips` (this platform's dialect — the frontmatter
-contract above). **One schema per run, per-city by design**: different
+`schemas/docs` (the frontmatter contract above). **One schema per run,
+per-city by design**: different
 dialects belong in different cities and banks. Two schemas writing one
 bank share tag space with no guarantee their vocabularies mean the same
 things — the schema layer makes writers pluggable, not vocabularies
@@ -243,7 +245,7 @@ Declared in TOML like all city config; env is the delivery mechanism.
 | Var | Where | Meaning |
 |---|---|---|
 | `HINDSIGHT_BANK` | `[workspace] env` — once per city, **required** | Bank id. No hardcoded default anywhere — scripts, command, and formulas fail loudly when unset. Process-env only (workspace env is not template-visible), which is why fragment prose references it as `$HINDSIGHT_BANK`. 1:1 city-to-bank is the intended shape; a per-agent `env` override is the escape hatch |
-| `HINDSIGHT_API` | `[workspace] env`, optional | API base URL override for the CLI |
+| `HINDSIGHT_API` | `[workspace] env`, optional | API base URL. Resolution everywhere: `--api` flag → this var → `~/.hindsight/config` `api_url` → loud refusal. No server is ever a hardcoded default |
 | `HINDSIGHT_MEMORY` | per-agent `env` / patch | Set non-empty to render `hindsight-brief`. THE opt-in switch |
 | `HINDSIGHT_PROPOSE` | per-agent `env` / patch | Set non-empty to render `hindsight-propose` |
 | `HINDSIGHT_MENTAL_MODELS` | per-agent `env`, optional | Space-separated mental-model ids fetched at session start |
@@ -255,7 +257,7 @@ Shared plumbing, once per city:
 
 ```toml
 [workspace]
-env = { HINDSIGHT_BANK = "stacked-chips-v2" }
+env = { HINDSIGHT_BANK = "omg" }
 ```
 
 Your own agent (a depending pack's `agent.toml`):
@@ -412,7 +414,7 @@ hit. See the cost map in `rebuild.md`.
 ### 3. Eleven retain strategies, selected by declaration
 
 A document declares `type` once in frontmatter. The schema
-(`schemas/stacked-chips/derive`) derives the `memory_type:` tag **and**
+(`schemas/docs/derive`) derives the `memory_type:` tag **and**
 the strategy from that one field. Authors never choose a strategy and
 never remember when one is needed.
 

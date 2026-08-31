@@ -26,7 +26,7 @@
 #                          --content-file provides merged content
 #   --content-file <f>     content from a file instead of stdin
 #   --bank <id>            bank (default: $HINDSIGHT_BANK; no fallback)
-#   --api <url>            Hindsight API base (default: $HINDSIGHT_API or prod)
+#   --api <url>            Hindsight API base (default: $HINDSIGHT_API, else ~/.hindsight/config api_url; never a hardcoded server)
 #   --drain-timeout <sec>  max wait for in-flight operations (default 300)
 #   --dry-run              print the payload, write nothing
 #
@@ -36,7 +36,15 @@
 # repo: retrieval TAGS are unaffected and required for rig discovery.
 set -euo pipefail
 
-API="${HINDSIGHT_API:-https://hindsight-api.brandondennis.me}"
+# API resolution: --api → $HINDSIGHT_API → the hindsight CLI's own config
+# (~/.hindsight/config api_url) → loud refusal. No hardcoded server.
+api_from_cli_config() {
+  local cfg="${HINDSIGHT_CONFIG:-$HOME/.hindsight/config}"
+  [[ -f "$cfg" ]] || return 0
+  sed -n 's/^[[:space:]]*api_url[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$cfg" | head -1
+}
+
+API="${HINDSIGHT_API:-}"
 BANK="" ID="" TYPE="gotcha" TITLE="" REPOS="" DOMAINS="" SCOPE="repo" SOURCE="agent"
 BUMP=false CONTENT_FILE="" DRY_RUN=false DRAIN_TIMEOUT=300
 
@@ -60,6 +68,8 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$BANK" ]] || BANK="${HINDSIGHT_BANK:-}"
 [[ -n "$BANK" ]] || { echo "no bank: set HINDSIGHT_BANK in [workspace] env, or pass --bank <id>" >&2; exit 2; }
+[[ -n "$API" ]] || API="$(api_from_cli_config)"
+[[ -n "$API" ]] || { echo "no API: set HINDSIGHT_API, configure api_url in ~/.hindsight/config, or pass --api <url>" >&2; exit 2; }
 [[ -n "$ID" ]] || { echo "--id is required" >&2; exit 2; }
 
 # Same type table as ship-docs.sh — one contract, two write paths.

@@ -32,7 +32,7 @@
 #   --bank <id>            bank to ship into (default: $HINDSIGHT_BANK;
 #                          no hardcoded fallback — every city declares its
 #                          own bank in [workspace] env)
-#   --api <url>            Hindsight API base (default: $HINDSIGHT_API or prod)
+#   --api <url>            Hindsight API base (default: $HINDSIGHT_API, else ~/.hindsight/config api_url; never a hardcoded server)
 #   --ref <ref>            ship this ref for every git root (default: auto)
 #   --fetch                git fetch origin in each git root first, so
 #                          origin/HEAD is current (fetch failure warns and
@@ -42,9 +42,9 @@
 #   --schema <dir>         schema directory: what counts as a doc, its
 #                          validation, and the derived retain fields
 #                          (default: $HINDSIGHT_SCHEMA, else the pack's
-#                          schemas/stacked-chips). One schema per run —
+#                          schemas/docs). One schema per run —
 #                          different dialects belong in different cities.
-#                          See schemas/stacked-chips/derive for the contract.
+#                          See schemas/docs/derive for the contract.
 #   --drain-timeout <sec>  max wait for in-flight bank operations (default 300)
 #   --dry-run              validate + diff + report only, write nothing
 #
@@ -76,7 +76,16 @@
 
 set -euo pipefail
 
-API="${HINDSIGHT_API:-https://hindsight-api.brandondennis.me}"
+# API resolution: --api → $HINDSIGHT_API → the hindsight CLI's own config
+# (~/.hindsight/config api_url) → loud refusal. No hardcoded server:
+# nobody's deployment is anybody else's default.
+api_from_cli_config() {
+  local cfg="${HINDSIGHT_CONFIG:-$HOME/.hindsight/config}"
+  [[ -f "$cfg" ]] || return 0
+  sed -n 's/^[[:space:]]*api_url[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$cfg" | head -1
+}
+
+API="${HINDSIGHT_API:-}"
 BANK=""
 REF_OVERRIDE=""
 DOMAINS_FILE=""
@@ -102,6 +111,8 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$BANK" ]] || BANK="${HINDSIGHT_BANK:-}"
 [[ -n "$BANK" ]] || { echo "no bank: set HINDSIGHT_BANK in [workspace] env, or pass --bank <id>" >&2; exit 2; }
+[[ -n "$API" ]] || API="$(api_from_cli_config)"
+[[ -n "$API" ]] || { echo "no API: set HINDSIGHT_API, configure api_url in ~/.hindsight/config, or pass --api <url>" >&2; exit 2; }
 [[ ${#ROOTS[@]} -gt 0 ]] || { echo "at least one docs root is required" >&2; exit 2; }
 
 # The schema is the dialect: it decides what counts as a doc, validates it,
@@ -109,7 +120,7 @@ done
 # (different dialects belong in different cities/banks). This core knows
 # no vocabulary at all.
 PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-[[ -n "$SCHEMA_DIR" ]] || SCHEMA_DIR="${HINDSIGHT_SCHEMA:-$PACK_DIR/schemas/stacked-chips}"
+[[ -n "$SCHEMA_DIR" ]] || SCHEMA_DIR="${HINDSIGHT_SCHEMA:-$PACK_DIR/schemas/docs}"
 DERIVE="$SCHEMA_DIR/derive"
 [[ -x "$DERIVE" ]] || { echo "schema '$SCHEMA_DIR' has no executable derive" >&2; exit 2; }
 

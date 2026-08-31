@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stacked-chips schema — the pack's default doc dialect.
+# docs schema — the pack's default doc dialect.
 #
 # Schema contract (what every schema's `derive` must do):
 #   stdin:  one candidate doc, whole file, frontmatter included
