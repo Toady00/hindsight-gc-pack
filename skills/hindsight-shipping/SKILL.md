@@ -10,11 +10,11 @@ ships, drafts included**. You get content into the bank by writing a doc
 and committing it — not by calling the Hindsight API. The archivist's
 scheduled sync (`ship-docs.sh`) is the single ship path.
 
-Authoritative contract: `retain-contract.md` in the hindsight pack. This
-skill is the working subset for authoring agents, and documents the
-**docs schema** — the pack's default dialect
-(`schemas/docs`); a city shipping a different dialect swaps it
-via `ship --schema` and brings its own version of this skill.
+The enforcement point is the schema itself (`schemas/docs/derive` —
+what it refuses is the contract). This skill is the working reference
+for authoring agents under the **docs schema**, the pack's default
+dialect; a city shipping a different dialect swaps it via
+`ship --schema` and brings its own version of this skill.
 
 ## Frontmatter every shippable doc needs
 

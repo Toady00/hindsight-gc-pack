@@ -111,7 +111,7 @@ if ! $SKIP_CONSOLIDATE; then
 fi
 
 # ---------- 3. config drift ----------
-# Bulk loads may deliberately disable auto-consolidation (rebuild.md) and a
+# Bulk loads may deliberately disable auto-consolidation, and a
 # crashed load's trap never fires. This catches the drift within a day.
 echo "== config drift =="
 hindsight -o json bank config "$BANK" > "$TMP/cfg.json" 2>/dev/null || echo '{}' > "$TMP/cfg.json"

@@ -143,7 +143,7 @@ times_word="times"; [[ "$HIT_COUNT" -eq 1 ]] && times_word="time"
 CONTENT="$(sed '/^Reported [0-9][0-9]* times\{0,1\} (last: .*).$/d' <<<"$CONTENT")"
 CONTENT="$(printf '%s\n\nReported %s %s (last: %s).\n' "$(printf '%s' "$CONTENT" | sed -e 's/[[:space:]]*$//')" "$HIT_COUNT" "$times_word" "$NOW")"
 
-# ---------- payload per retain-contract ----------
+# ---------- contract payload ----------
 repos_json="$(jq -cRn --arg s "$REPOS" '$s | split(",") | map(select(length>0))')"
 domains_json="$(jq -cRn --arg s "$DOMAINS" '$s | split(",") | map(select(length>0))')"
 context="$TYPE: $TITLE"

@@ -9,24 +9,25 @@ Built against Hindsight **0.9.1**. No server is ever defaulted: the API
 resolves `--api` → `$HINDSIGHT_API` → the hindsight CLI's own config
 (`~/.hindsight/config` `api_url`) → loud refusal.
 
-## Design documents
+## The bank template
 
-Deployment-local working notes — deliberately **not tracked in the
-pack repo** (a fresh clone will not have them; they describe one
-deployment's bank, not the pack):
-
-| File | Purpose |
-|---|---|
-| `agent-runbook.md` | **Hand this to an agent.** When and how to read and write the bank. No rationale. |
-| `bank-template.json` | The bank manifest. Source of truth. Import this. |
-| `deferred-mental-models.json` | Phase-2 mental models, held until the corpus can feed them. Not importable as-is. |
-| `retain-contract.md` | What every writer must send on retain. The integration half, with rationale. |
-| `rebuild.md` | Teardown, rebuild, bulk load, maintenance, cost map. |
+`example.bank-template.json` is the working starting point: the bank
+missions and dispositions, the eleven retain strategies the default
+`docs` schema emits, the six directives protecting the bank's core
+distinctions, and the four mental models the pack itself references
+(`conventions-and-standards` and `landmines` feed the nightly audit;
+the service map and open-risks models are the coordinator briefs in
+the wiring recipes). Copy it, extend it with your own mental models,
+import it:
 
 ```bash
-hindsight bank import-template <bank> bank-template.json --dry-run
-hindsight bank import-template <bank> bank-template.json
+hindsight bank import-template <bank> example.bank-template.json --dry-run
+hindsight bank import-template <bank> example.bank-template.json
 ```
+
+Re-importing after edits is safe and immediate for missions,
+directives, dispositions, and mental models; retain strategies govern
+extraction and apply forward-only (see "Two properties worth knowing").
 
 ## The pack
 
@@ -65,7 +66,7 @@ Every path in one place. Details for each live in the sections below.
 **Operator — install and wire (once per city):**
 
 1. Import the pack (above) and create the bank:
-   `hindsight bank import-template <bank> bank-template.json`
+   `hindsight bank import-template <bank> example.bank-template.json`
 2. Declare the bank in `city.toml` — required, no default anywhere:
    `[workspace] env = { HINDSIGHT_BANK = "<bank>" }`
    (add `HINDSIGHT_API` if not using the CLI's configured server)
@@ -163,7 +164,7 @@ been exercised in a running city. Treat `pack.toml`, `orders/`, and
 
 Deliberately not in the pack (yet): a git-hook ship trigger (optional
 immediacy, never load-bearing — add per-repo later if wanted), bulk
-backfill automation (rehearse via `test/` + `rebuild.md` instead), and any
+backfill automation (rehearse via `test/` on a disposable bank), and any
 per-rig session or per-repo mental models (per-repo observation scopes
 already provide that lens).
 
@@ -395,7 +396,7 @@ at all**, and a cross-cutting HLD carries `scope:`, `domain:`, `memory_type:`,
 and `source:` — so it is tagged, so it never matches a repo-scoped query.
 `any_strict` matches any listed tag while excluding untagged, which is what makes
 the explicit `scope:platform` marker visible from inside a repo. Details in
-`retain-contract.md`.
+the `hindsight-memory` skill.
 
 ### 2. Six tag axes, all writer-stamped
 
@@ -412,7 +413,7 @@ distinction the writer cannot know at retain time, such as which sentences
 document-level, so none of them qualify. Entity labels are also the most
 expensive thing to get wrong here — existing entities are never reclassified —
 so the group to add is the one aimed at a retrieval failure you have actually
-hit. See the cost map in `rebuild.md`.
+hit.
 
 ### 3. Eleven retain strategies, selected by declaration
 
@@ -480,6 +481,5 @@ setting here, which is why it is deliberately absent from the manifest.
 The saving grace: every document lives in git with a stable `document_id`, so
 any extraction mistake is recoverable by re-retaining from source. That is a
 rebuild script, not data loss — and it is a luxury a session-sourced bank does
-not have.
-
-Full cost map in `rebuild.md`.
+not have. (Bank-native agent memories are the exception: back them up with
+the bank's export tooling before any teardown.)

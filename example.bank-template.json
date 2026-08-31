@@ -1,0 +1,124 @@
+{
+  "version": "1",
+  "bank": {
+    "retain_mission": "This bank is the durable record of a software platform and the business it serves. Extract knowledge that stays true and stays useful: what was decided and why, what is required, what constrains the work, what conventions hold across the platform, what exists today, and what was actually built. Preserve identifiers, version numbers, schema and field names, endpoints, commands, formulas, thresholds, units, and configuration values exactly as written — they are the payload, not decoration. Ignore process narration, agent coordination chatter, tool invocation output, status updates that carry no decision, and restatements of content already recorded in another document.",
+    "retain_extraction_mode": "verbose",
+    "observations_mission": "Synthesize durable platform knowledge from the authored record: standing decisions and their current status, conventions that hold across repositories, contracts and interfaces between services, recurring constraints, and unresolved questions. When a later decision supersedes an earlier one, record the current position and note what it replaced. Keep three things distinct at all times: what was specified, what was built, and what was observed to exist. Attribute unsettled positions and owner thinking as such rather than promoting them to platform fact.",
+    "reflect_mission": "You are this platform's engineering memory. You answer from the authored record — PRDs, specifications, ADRs, high-level designs, methodologies, conventions, user journeys, discussions, current-state surveys, and build reports — across every repository in the platform. Ground every claim in retained documents. Name which document, repository, or domain a claim comes from, and how old it is when age matters. Say plainly when the record is silent, thin, or self-contradictory rather than filling the gap.",
+    "disposition_skepticism": 4,
+    "disposition_literalism": 4,
+    "disposition_empathy": 2,
+    "retain_strategies": {
+      "design-record": {
+        "retain_mission": "Extract the decision and everything that makes it actionable: what was chosen, what alternatives were considered and why they were rejected, the requirements and acceptance criteria, the constraints and their causes, the interfaces and contracts between components, and the consequences accepted. Record what this supersedes when stated. Preserve identifiers, endpoints, schema and field names, formulas, thresholds, and configuration values exactly as written."
+      },
+      "product-doc": {
+        "retain_mission": "Extract the problem being solved, who it is for, the outcomes and success measures, the scope boundaries and explicit non-goals, and the user-facing behavior being committed to. Capture personas, journey steps, decision points, and failure paths as distinct facts. Preserve stated metrics and thresholds verbatim. Ignore motivational framing and market narrative that commits the team to nothing."
+      },
+      "methodology": {
+        "retain_mission": "Extract the domain calculation or analytical method: what it computes, the approved approach and any ranked fallbacks together with the conditions that select each, the required inputs and their sources, and the assumptions and limits of validity. Reproduce formulas, thresholds, constants, units, and time windows EXACTLY as written — never paraphrase, round, or approximate a numeric value. Capture any stated disclosure, explanation, or review obligation attached to the method. Do not retain source data, market data, or issuer records; only the method itself."
+      },
+      "convention": {
+        "retain_mission": "Extract standing platform conventions and technology choices: the tool, language, service, or practice adopted; what it applies to; the rationale; and the conditions under which it does or does not apply. Preserve ranked preferences and their fallbacks as a single fact with the ordering and conditions intact — 'prefer X, fall back to Y when Z' must never be split into unrelated statements. Capture explicit anti-preferences and the bar an alternative must clear to override them. Capture the canonical setup or configuration pattern for an adopted tool where one exists — which hooks run on which events, which tasks a task runner defines, how a version manager is expected to be configured — as part of the convention itself. Preserve exact tool names, versions, commands, and configuration values."
+      },
+      "current-state": {
+        "retain_mission": "Extract the observed state of a system as it exists today: services, components, and their responsibilities; interfaces, endpoints, schemas, and data stores actually in use; dependencies, runtimes, and versions; deployment and infrastructure topology; and known deviations from platform conventions. Record each fact as OBSERVED, not as decided or intended. Where the rationale for something is unknown, record the fact and state that the reason is undocumented — never infer or invent a rationale. Explicitly capture anything that appears accidental, inconsistent, or contrary to a stated platform convention, along with any evidence of why it is that way. Preserve exact names, versions, endpoints, paths, schema and field names, and configuration values."
+      },
+      "discussion": {
+        "retain_mission": "Extract what was DECIDED separately from what was PROPOSED. A position someone advocated is not a decision — record it as a position, attributed to who raised it. Capture commitments with their owners, action items, objections raised, and questions left unresolved. Note explicitly when a thread ended without resolution. Ignore scheduling, pleasantries, and restatements of documents that already exist in the bank."
+      },
+      "voice-memo": {
+        "retain_mission": "Extract the durable substance of an owner voice memo: ideas worth preserving, concerns, problems encountered, decisions under consideration, and priorities. Record these as the owner's current thinking, never as settled platform decisions. Preserve specifics — names, numbers, error text, tool names — even when the surrounding phrasing is rough. Ignore filler, false starts, self-corrections, and transcription artifacts; where a sentence is garbled but the intent is clear, extract the intent."
+      },
+      "build-report": {
+        "retain_extraction_mode": "concise",
+        "retain_mission": "Extract what was actually built: the components, interfaces, and behavior that shipped; each deviation from what the specification required and the reason for it; constraints discovered during implementation; and follow-up work left open. Ignore task-by-task progress narration, tool output, and restatement of the specification."
+      },
+      "operational-runbook": {
+        "retain_extraction_mode": "verbatim",
+        "retain_chunk_size": 8000,
+        "retain_mission": "Preserve operational procedures for the running system exactly as written and in order. Commands, flags, paths, environment variables, thresholds, and alert conditions must survive verbatim. Extract the systems, services, and tools involved as entities."
+      },
+      "gotcha": {
+        "retain_extraction_mode": "concise",
+        "retain_mission": "Extract the trap and how to avoid it: the exact symptom or error text, the underlying cause, the correct approach, and where it applies. Keep it short and literal — exact error strings, commands, and configuration values. Ignore how it was discovered."
+      },
+      "source-document": {
+        "retain_extraction_mode": "verbatim",
+        "retain_mission": "Preserve the source wording exactly while extracting entities, dates, identifiers, and indexing metadata. For third-party specifications, contracts, vendor documentation, and any document whose precise language is itself the fact."
+      }
+    }
+  },
+  "directives": [
+    {
+      "name": "Decisions outrank thinking",
+      "content": "When sources conflict, prefer what a specification, ADR, PRD, methodology, or convention establishes as decided over a position raised in a discussion or an owner voice memo. A voice memo captures the owner's current thinking and a discussion may capture positions nobody adopted; neither is a settled decision. Attribute unsettled positions as such, with who raised them. When a decision is marked superseded or deprecated, answer with what replaced it and name what it replaced. Do not treat an explicit supersession as an unresolved contradiction."
+    },
+    {
+      "name": "Distinguish intent from reality",
+      "content": "What a specification requires, what a build report says shipped, and what a current-state survey observed are three different claims and must never be merged into one account. Observed state describes a system at a point in time; it is not a decision, a convention, or a precedent, and it never establishes one. When these sources diverge, report the divergence explicitly, name the date of any observation, and present it as drift or deviation rather than reconciling it silently."
+    },
+    {
+      "name": "Name the scope of every claim",
+      "content": "This bank spans many repositories and domains. State which repository or domain a claim comes from. Never present a convention, interface, or practice observed in one repository as platform-wide unless the record establishes it as platform-wide."
+    },
+    {
+      "name": "Never approximate a retained number",
+      "content": "When reporting a formula, threshold, constant, unit, or time window drawn from a methodology, specification, or convention, reproduce it exactly as retained. Never paraphrase, round, or interpolate a numeric value. If the retained record is ambiguous, or two sources disagree, say so and cite both rather than producing a plausible number."
+    },
+    {
+      "name": "Preserve ranked preferences intact",
+      "content": "When reporting a platform convention that expresses a ranked preference, state the full ordering and the conditions that select each option, including any explicit anti-preference and the bar for overriding it. Never report one option from a ranked preference as though it were the platform's unconditional choice."
+    },
+    {
+      "name": "Do not invent platform facts",
+      "content": "Do not invent services, repositories, endpoints, schemas, configuration values, tools, or conventions that are not grounded in retained documents. If the record is missing, thin, or contradictory, say so and name specifically what is missing."
+    }
+  ],
+  "mental_models": [
+    {
+      "id": "platform-architecture-and-service-map",
+      "name": "Platform Architecture and Service Map",
+      "source_query": "Describe the current platform architecture across services and repositories: responsibilities, interfaces, dependencies, data flows, ownership boundaries, major decisions, shared infrastructure, and operational characteristics. Highlight architectural constraints, cross-repository coupling, workarounds, technical debt, and areas where current implementation diverges from upstream rationale.",
+      "max_tokens": 6144,
+      "trigger": {
+        "mode": "full",
+        "refresh_after_consolidation": true,
+        "exclude_mental_models": true
+      }
+    },
+    {
+      "id": "conventions-and-standards",
+      "name": "Conventions and Standards",
+      "source_query": "What tools, languages, services, and practices has this platform standardized on, what is each used for, and what is the canonical setup or configuration pattern for each? Where a preference is ranked, state the full ordering and the conditions that select each option. What does the platform deliberately avoid, and what bar must an alternative clear to override that?",
+      "max_tokens": 6144,
+      "trigger": {
+        "mode": "full",
+        "refresh_after_consolidation": true,
+        "exclude_mental_models": true
+      }
+    },
+    {
+      "id": "open-risks-and-questions",
+      "name": "Open Risks and Questions",
+      "source_query": "What risks, blockers, unresolved questions, and pending decisions are currently outstanding across the platform? For each, what is at stake, who raised it, what would resolve it, and has anything superseded it?",
+      "max_tokens": 4096,
+      "trigger": {
+        "mode": "full",
+        "refresh_after_consolidation": true,
+        "exclude_mental_models": true
+      }
+    },
+    {
+      "id": "landmines",
+      "name": "Landmines",
+      "source_query": "What pitfalls, traps, and hard-won operational lessons have been recorded — the things that cost someone time and should not be rediscovered? For each, give the exact symptom or error, the cause, the correct approach, and where it applies.",
+      "max_tokens": 4096,
+      "trigger": {
+        "mode": "full",
+        "refresh_after_consolidation": true,
+        "exclude_mental_models": true
+      }
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 #
 # max_active_sessions = 1 is load-bearing: re-retaining a document_id while
 # a prior operation for it is still processing orphans memories that no
-# future replace can reach (verified 2026-08-25, retain-contract.md).
+# future replace can reach (verified live, 2026-08-25).
 # One archivist session at a time makes the single-writer rule structural
 # instead of aspirational. Do not raise it.
 
