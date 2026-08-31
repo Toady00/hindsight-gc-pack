@@ -1,9 +1,12 @@
-# Nightly consolidation + audit. Deliberately not per-ship: consolidation
-# is expensive (~160s for a 6-doc corpus) and observations are allowed to
-# lag raw memories. Runs off-peak relative to the hourly ship-sync order;
-# the formula's drain step keeps the two from overlapping a moving corpus.
+# Nightly audit + consolidation backstop. Not the freshness trigger:
+# auto-consolidation is on, so the server consolidates after retains by
+# itself. This order exists for the audits (tag hygiene, config drift,
+# mental-model overreach — nothing server-side does those) with an
+# ensure-and-wait consolidation pass so the audits see a settled corpus.
+# Runs off-peak relative to the hourly ship-sync order; the formula's
+# drain step keeps the two from overlapping a moving corpus.
 [order]
-description = "Nightly Hindsight consolidation, tag audit, and mental-model spot-audit"
+description = "Nightly Hindsight audit (tags, config drift, mental models) + consolidation backstop"
 scope = "city"
 formula = "mol-hindsight-consolidate"
 trigger = "cooldown"

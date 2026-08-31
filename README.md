@@ -9,6 +9,10 @@ Built against Hindsight **0.9.1**, server `https://hindsight-api.brandondennis.m
 
 ## Design documents
 
+Stacked-chips-local working notes — deliberately **not tracked in the
+pack repo** (a fresh clone will not have them; they describe this
+platform's bank, not the pack):
+
 | File | Purpose |
 |---|---|
 | `agent-runbook.md` | **Hand this to an agent.** When and how to read and write the bank. No rationale. |
@@ -29,17 +33,17 @@ hindsight bank import-template stacked-chips-v2 bank-template.json
 | `pack.toml` | Pack manifest; declares the `archivist` city session |
 | `agents/archivist/` | The bank's **single writer**. `max_active_sessions = 1` structurally enforces write serialization |
 | `formulas/mol-hindsight-ship.toml` | Reconcile docs trees → bank (validate, ship changed, poll to terminal) |
-| `formulas/mol-hindsight-consolidate.toml` | Nightly: drain ops, consolidate, tag audit, mental-model spot-audit |
+| `formulas/mol-hindsight-consolidate.toml` | Nightly: audit first (tags, config drift, mental-model overreach), consolidation as ensure-and-wait backstop — auto-consolidation handles freshness |
 | `orders/ship-sync.toml` | Hourly convergence backstop — makes all other ship triggers non-load-bearing |
-| `orders/consolidate.toml` | Nightly consolidation + audit |
+| `orders/consolidate.toml` | Nightly audit + consolidation backstop |
 | `commands/ship/` | `gc` command: ship the docs manually at any point (auto-resolves roots; owns `--dry-run` for previews) |
-| `assets/scripts/ship-docs.sh` | The single ship path, **stateless** (the bank is the ledger — stamped content hashes in `document_metadata`) and **ref-based** (ships committed content of `origin/HEAD`/`HEAD`, never the working tree). Contract enforcement, hash diff, drain-before-ship, op polling, GONE reports |
+| `assets/scripts/ship-docs.sh` | The docs-corpus ship path, **stateless** (the bank is the ledger — stamped content hashes in `document_metadata`) and **ref-based** (ships committed content of `origin/HEAD`/`HEAD`, never the working tree). Schema-driven validation, hash diff, drain-before-ship, op polling, GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
 | `schemas/` | Pluggable doc dialects: `stacked-chips` (this platform's frontmatter contract, the default) and `null` (raw passthrough). Each is `derive` + `audit-vocab.json` — see "The schema layer" |
 | `skills/hindsight-memory/` | Read patterns for every agent: reflect/recall cadence, scoping, status semantics, `tag_groups` caveats |
-| `skills/hindsight-shipping/` | Write patterns for authoring agents: frontmatter contract, gates, gotcha capture |
-| `template-fragments/` | The **fragment contract**: `hindsight-brief` / `hindsight-propose` dispatchers consumers wire into any agent's prompt (see below) |
+| `skills/hindsight-shipping/` | Write patterns: frontmatter contract (stacked-chips dialect), approval recording, agent-contributed memory mechanics |
+| `template-fragments/` | The **fragment contract**: `hindsight-brief` / `hindsight-propose` / `hindsight-arbitrate` dispatchers consumers wire into agents' prompts (see below) |
 | `test/` | Rehearsal harness: dummy docs + validated prototype shipper + probe results from the 2026-08-25 live experiment |
 
 Install into a city (path import while the pack is local):
@@ -51,6 +55,67 @@ source = "../hindsight"
 
 referenced from `workspace.pack` so the archivist expands city-scoped.
 Rig agents need no sessions from this pack — they consume the two skills.
+
+## Using this pack
+
+Every path in one place. Details for each live in the sections below.
+
+**Operator — install and wire (once per city):**
+
+1. Import the pack (above) and create the bank:
+   `hindsight bank import-template <bank> bank-template.json`
+2. Declare the bank in `city.toml` — required, no default anywhere:
+   `[workspace] env = { HINDSIGHT_BANK = "<bank>" }`
+   (add `HINDSIGHT_API` if not using the CLI's configured server)
+3. Opt agents into memory: `append_fragments`/`inject_fragments_append`
+   + the gate env vars per agent — see "Wiring recipes"
+4. The orders take it from there: hourly ship sync, nightly audit. The
+   archivist wakes only when work arrives.
+
+**Doc author (human or agent) — publish a doc:**
+
+Write markdown with the frontmatter contract (see the
+`hindsight-shipping` skill), put it in a walked docs tree, commit to the
+canonical branch. Commit **is** publish; it ships within the hour.
+Impatient or previewing: `gc ship` / `gc ship --dry-run`. Revise by
+editing in place; retire with `status: deprecated` — never delete.
+
+**Reading agent — query memory:**
+
+If the operator opted you in, your prompt already carries the brief:
+one scoped `reflect` at task start, `recall` freely during work,
+mental models for standing answers. The `hindsight-memory` skill has
+the full patterns. No setup on your side.
+
+**Worker who hit a landmine — propose a memory:**
+
+You do not write to the bank. Mail the archivist (your prompt's
+`hindsight-propose` fragment has the format and the self-filter). The
+archivist dedups, applies the four gates, and retains or replies why
+not. Repeat reports bump the memory's hit count instead of duplicating
+it.
+
+**Depending pack author (e.g. a product pack with its own agents):**
+
+Import this pack from yours (`[imports.hindsight]` — transitive, the
+city gets everything). Wire your agents via your own `agent.toml` env +
+fragments, patch agents from other packs with `[[patches.agent]]`, and
+specialize prose by defining `hindsight-brief-<agent>` fragments. Want
+your own doc dialect? Ship a `schemas/<yours>/` directory and select it
+per run — see "The schema layer".
+
+**Different conventions entirely:**
+
+`ship --schema schemas/null` reads raw `hindsight:` frontmatter blocks —
+no vocabulary, no protection, you own the invariants. One schema per
+run; different dialects belong in different cities and banks.
+
+**Operator — maintenance and repair:**
+
+The nightly order audits (tag hygiene, config drift, mental-model
+overreach) and runs a consolidation backstop; findings reach you by
+mail from the archivist. Removing something on purpose is manual by
+design — see "Deleting from the bank".
 
 ## The shipping contract
 
@@ -295,8 +360,9 @@ surveys, build reports, gotchas, and owner voice memos.
 
 Agent-to-agent conversation is explicitly out. A three-week orchestrator session
 is noise — everything durable in it is a distillation of something a human said
-somewhere else, and the exceptions get written down deliberately as `gotcha`
-documents rather than harvested from transcripts.
+somewhere else, and the exceptions arrive deliberately as arbitrated `gotcha`
+memories (see "Agent-contributed memory") rather than harvested from
+transcripts.
 
 This inverts the assumption most Hindsight tuning starts from. The bank default
 is `verbose` extraction, not `concise`, because the corpus is dense authored
@@ -345,9 +411,10 @@ hit. See the cost map in `rebuild.md`.
 
 ### 3. Eleven retain strategies, selected by declaration
 
-A document declares `type` once in frontmatter. The shipper derives the
-`memory_type:` tag, the `source:` tag, **and** the strategy from that one field.
-Authors never choose a strategy and never remember when one is needed.
+A document declares `type` once in frontmatter. The schema
+(`schemas/stacked-chips/derive`) derives the `memory_type:` tag **and**
+the strategy from that one field. Authors never choose a strategy and
+never remember when one is needed.
 
 The strategies partition by **extraction behavior**, not document taxonomy —
 taxonomy is what `memory_type:` is for:
@@ -367,7 +434,8 @@ taxonomy is what `memory_type:` is for:
 | `source-document` | third-party material, verbatim |
 
 **A strategy name that does not exist is silently ignored** — you get bank
-defaults with no error. The shipper must refuse unknown `type` values.
+defaults with no error. That is why the schema refuses unknown `type`
+values instead of passing them through.
 
 ---
 

@@ -1,16 +1,20 @@
 description = """
-Nightly bank maintenance: drain, consolidate, audit.
+Nightly bank maintenance: audit first, consolidation as backstop.
 
 The mechanical work is one deterministic script (bank-maintain.sh): drain
 in-flight operations, consolidate with recover+retry, and a tag audit
-(axis check, contract vocabulary, rig registry, domain vocab, case-split
+(axis check, schema vocabulary, rig registry, domain vocab, case-split
 and Levenshtein near-duplicate detection). The agent's job is only what a
 script cannot decide: reading mental models for overreach, judging whether
 findings are incidents, and escalating.
 
-Consolidation is scheduled, not per-ship: it took ~160s on a 6-doc test
-corpus, so running it after every ship does not scale. Ship continuously,
-consolidate nightly, accept that observations lag raw memories by hours.
+This job is NOT the freshness trigger. The bank runs with
+enable_auto_consolidation on, so the server consolidates after retains on
+its own; observations stay current without this order. The nightly value
+is what no server-side process does — the audits (tag hygiene, config
+drift, mental-model overreach) — plus an ensure-and-wait consolidation
+pass that gives the audits a settled corpus and catches anything
+auto-consolidation missed (e.g. after it was suspended for a bulk load).
 """
 formula = "mol-hindsight-consolidate"
 version = "0.1.0"
