@@ -246,6 +246,7 @@ Declared in TOML like all city config; env is the delivery mechanism.
 |---|---|---|
 | `HINDSIGHT_BANK` | `[workspace] env` — once per city, **required** | Bank id. No hardcoded default anywhere — scripts, command, and formulas fail loudly when unset. Process-env only (workspace env is not template-visible), which is why fragment prose references it as `$HINDSIGHT_BANK`. 1:1 city-to-bank is the intended shape; a per-agent `env` override is the escape hatch |
 | `HINDSIGHT_API` | `[workspace] env`, optional | API base URL. Resolution everywhere: `--api` flag → this var → `~/.hindsight/config` `api_url` → loud refusal. No server is ever a hardcoded default |
+| `HINDSIGHT_DOCS_ROOTS` | `[workspace] env`, optional | Whitespace-separated docs roots added to the ship sync's auto-resolution — the channel for standalone docs repos that are not rigs. Managed sessions inherit it, so the scheduled order covers them |
 | `HINDSIGHT_MEMORY` | per-agent `env` / patch | Set non-empty to render `hindsight-brief`. THE opt-in switch |
 | `HINDSIGHT_PROPOSE` | per-agent `env` / patch | Set non-empty to render `hindsight-propose` |
 | `HINDSIGHT_MENTAL_MODELS` | per-agent `env`, optional | Space-separated mental-model ids fetched at session start |

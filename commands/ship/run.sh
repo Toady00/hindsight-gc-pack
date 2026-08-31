@@ -41,8 +41,11 @@ if ! $BANK_SET; then
   fi
 fi
 
-# No roots given: derive each rig's docs/ from the city, plus the city
-# root's own docs/ if present.
+# No roots given: derive each rig's docs/ from the city, the city root's
+# own docs/ if present, plus any roots pinned in HINDSIGHT_DOCS_ROOTS
+# (whitespace-separated paths, set in [workspace] env — the channel for
+# standalone docs repos that are not rigs; managed sessions inherit it,
+# so the scheduled order covers them too).
 if [[ ${#ROOTS[@]} -eq 0 ]]; then
   if command -v gc >/dev/null 2>&1; then
     while IFS= read -r path; do
@@ -50,6 +53,11 @@ if [[ ${#ROOTS[@]} -eq 0 ]]; then
     done < <(gc rig list --json 2>/dev/null | jq -r '.rigs[]?.path // empty' 2>/dev/null || true)
   fi
   [[ -d "docs" ]] && ROOTS+=("docs")
+  if [[ -n "${HINDSIGHT_DOCS_ROOTS:-}" ]]; then
+    for r in ${HINDSIGHT_DOCS_ROOTS}; do
+      [[ -d "$r" ]] && ROOTS+=("$r") || echo "WARN: HINDSIGHT_DOCS_ROOTS entry '$r' is not a directory" >&2
+    done
+  fi
 fi
 if [[ ${#ROOTS[@]} -eq 0 ]]; then
   echo "no docs roots found (no rigs with docs/, no ./docs); pass roots explicitly" >&2

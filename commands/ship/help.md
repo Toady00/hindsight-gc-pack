@@ -20,7 +20,10 @@ ship --fetch            git fetch origin in each root first (the scheduled
 
 Also honors `--api`, `--ref`, `--domains`, `--schema`, `--drain-timeout`
 (see `assets/scripts/ship-docs.sh` header) and `HINDSIGHT_BANK` /
-`HINDSIGHT_API` / `HINDSIGHT_SCHEMA` environment variables. The schema —
+`HINDSIGHT_API` / `HINDSIGHT_SCHEMA` / `HINDSIGHT_DOCS_ROOTS`
+environment variables. Auto-resolved roots are every rig's `docs/`, the
+city root's `docs/` if present, plus any `HINDSIGHT_DOCS_ROOTS` entries
+(standalone docs repos that are not rigs). The schema —
 which frontmatter dialect the walked docs speak — defaults to the pack's
 `schemas/docs`; one schema per run, per-city by design.
 
