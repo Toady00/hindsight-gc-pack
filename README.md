@@ -93,9 +93,10 @@ the full patterns. No setup on your side.
 
 You do not write to the bank. Mail the archivist (your prompt's
 `hindsight-propose` fragment has the format and the self-filter). The
-archivist dedups, applies the four gates, and retains or replies why
-not. Repeat reports bump the memory's hit count instead of duplicating
-it.
+archivist checks scope (platform knowledge only — city-operations
+lore belongs in AGENTS.md, not the bank), dedups, applies the four
+gates, and retains or replies why not. Repeat reports bump the
+memory's hit count instead of duplicating it.
 
 **Depending pack author (e.g. a product pack with its own agents):**
 
@@ -221,7 +222,7 @@ Published names (stable API — renaming one is a breaking change):
 |---|---|
 | `hindsight-brief` | Read-side: the bank exists, the one-reflect task-start ritual, optional standing mental models, skill pointer |
 | `hindsight-propose` | Write-side: self-filter + the four-field proposal mail to the archivist, who arbitrates retention (single-writer preserved) |
-| `hindsight-arbitrate` | The archivist's acceptance policy: dedup-first (bump `hit_count` on repeat reports), four gates, deny-biased. Wired by this pack onto its own archivist; no gate var |
+| `hindsight-arbitrate` | The archivist's acceptance policy: scope check (platform knowledge, not city-ops), dedup-first (bump `hit_count` on repeat reports), four gates, deny-biased. Wired by this pack onto its own archivist; no gate var |
 
 All are dispatchers; `brief` and `propose` are additionally gated on a
 per-agent env var. Each tries the most specific registered
@@ -304,9 +305,10 @@ re-injects the prime into the system prompt each turn).
 The pipeline for what agents learn the hard way: **proposal mail →
 arbitration → bank-native retain**. Workers never write; they mail the
 archivist (`hindsight-propose` carries the format and self-filter). New
-reports face four deny-biased gates (verified / a trap / expensive when
-sprung / durable — `hindsight-arbitrate` is the policy, the
-`hindsight-shipping` skill the mechanics); accepted memories are
+reports face a scope check (about the platform, not the machinery
+operating the city) and four deny-biased gates (verified / a trap /
+expensive when sprung / durable — `hindsight-arbitrate` is the policy,
+the `hindsight-shipping` skill the mechanics); accepted memories are
 retained by `memory-retain.sh` — `type: gotcha` today, and the pipeline
 is type-agnostic.
 

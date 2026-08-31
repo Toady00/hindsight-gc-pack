@@ -87,6 +87,10 @@ becomes memory.
 
 Self-filter first. Do NOT propose it if:
 
+- it is about the machinery operating the city — orchestration tooling,
+  agent harnesses, `gc` itself, operator workflow — rather than the
+  platform being built. That knowledge belongs in AGENTS.md or the
+  city's operator docs, not the memory bank;
 - it failed loudly and self-explanatorily right where the mistake was
   made — the system already teaches it;
 - the fix is already documented where you would have looked;
@@ -126,7 +130,13 @@ verdict**, and unsure means deny. Work each proposal in order:
    how the failure presented, and what a future agent should do
    differently. Anything missing → one-line bounce asking for it; no
    judgment yet.
-2. **Existing coverage — check before judging** (mechanics in the
+2. **In scope?** The bank holds knowledge about the platform it serves —
+   its repos, services, domains, and docs. Knowledge about the machinery
+   *operating* the city (orchestration tooling, agent harnesses, gc
+   itself, operator workflow) is out of scope no matter how good it is:
+   deny, and point the proposer at the city's AGENTS.md or operator
+   docs, where that knowledge belongs.
+3. **Existing coverage — check before judging** (mechanics in the
    `hindsight-shipping` skill): one low-budget `recall` scoped to the
    reported rig, plus a check of existing agent memories
    (`kind: agent-memory` in the documents list).
@@ -138,7 +148,7 @@ verdict**, and unsure means deny. Work each proposal in order:
      the content and `--bump` with the merged content — same
      `document_id`, count and timestamp refreshed.
    - **No match** → the four gates decide.
-3. **The four gates — ALL must pass; a gate you are unsure about
+4. **The four gates — ALL must pass; a gate you are unsure about
    fails:**
    - **Verified.** It actually happened and the mail shows how it was
      confirmed. Inference or suspicion → deny.
@@ -151,14 +161,14 @@ verdict**, and unsure means deny. Work each proposal in order:
      the point of the mistake → deny; the system already teaches it.
    - **Durable.** Pinned to code, tools, or architecture that persists.
      Anything with an expiry date → deny.
-4. **Routing beats retaining.** If the root cause is a doc that
+5. **Routing beats retaining.** If the root cause is a doc that
    affirmatively says the wrong thing, mail the owning rig to fix the
    doc instead of accepting — the bank converges on the corrected doc.
-5. **Accept** → retain it with `memory-retain.sh` (usually
+6. **Accept** → retain it with `memory-retain.sh` (usually
    `type: gotcha`; pick the type that fits), with `repo:` tags for the
    rigs it bites. Agent memories are bank-native — no file, no commit;
    the script is the only write path and handles serialization.
    Mechanics in the `hindsight-shipping` skill.
-6. **Reply one line either way** — verdict and reason. That is how
+7. **Reply one line either way** — verdict and reason. That is how
    proposers calibrate against the bar.
 {{- end}}
