@@ -53,13 +53,25 @@
 You have read access to the platform's shared memory bank
 (`$HINDSIGHT_BANK`): its documents — PRDs, ADRs, specs, conventions,
 surveys, gotchas — distilled into queryable memory.
-
-At task start, run ONE reflect scoped to your context and keep the
-answer for the whole session:
+{{if .RigName}}
+At task start, run ONE reflect scoped to your rig and keep the answer
+for the whole task:
 
     hindsight memory reflect "$HINDSIGHT_BANK" "<the task, verbatim>" \
-      --tags {{if .RigName}}repo:{{.RigName}},scope:platform{{else}}scope:platform,scope:business{{end}} --tags-match any_strict --budget mid
-{{if .HINDSIGHT_MENTAL_MODELS}}
+      --tags repo:{{.RigName}},scope:platform --tags-match any_strict --budget mid
+{{else}}
+You field many unrelated asks in one session, so there is no single
+task-start ritual. Use reflect at will — once per NEW ask that touches
+the platform, scoped to what the ask touches (include `repo:<rig>` for
+every rig involved):
+
+    hindsight memory reflect "$HINDSIGHT_BANK" "<the ask, verbatim>" \
+      --tags repo:<rig>,scope:platform,scope:business --tags-match any_strict --budget mid
+
+Skip the ritual entirely for asks about operating the city itself
+(orchestration, sessions, orders): that knowledge is deliberately not
+in the bank.
+{{end}}{{if .HINDSIGHT_MENTAL_MODELS}}
 Also fetch your standing briefs before starting work — read only
 `.content`, never the whole response:
 

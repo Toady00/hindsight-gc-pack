@@ -17,7 +17,11 @@ BANK="${HINDSIGHT_BANK:?HINDSIGHT_BANK not set — declare it in [workspace] env
 
 1. **Task start, once:** one `reflect` scoped to your rig. Keep the answer
    for the whole session. Run it again only if the task changes into a
-   different problem.
+   different problem. (Coordinators fielding many unrelated asks in one
+   session — mayor-shaped agents — instead reflect once per NEW
+   platform-touching ask, scoped to whatever the ask touches, and skip
+   it for city-operations asks: that knowledge is deliberately not in
+   the bank.)
 2. **During work, freely:** `recall` for specific lookups (sub-second,
    cheap) and `mental-model get` for standing answers.
 3. **Never:** reflect per turn, recall before every message, or
