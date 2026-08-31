@@ -22,7 +22,7 @@ ROOTS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bank) BANK_SET=true; PASS+=("$1" "$2"); shift 2 ;;
-    --api|--ref|--domains|--drain-timeout) PASS+=("$1" "$2"); shift 2 ;;
+    --api|--ref|--domains|--schema|--drain-timeout) PASS+=("$1" "$2"); shift 2 ;;
     --dry-run|--fetch) PASS+=("$1"); shift ;;
     -h|--help) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown flag: $1" >&2; exit 2 ;;

@@ -36,6 +36,7 @@ hindsight bank import-template stacked-chips-v2 bank-template.json
 | `assets/scripts/ship-docs.sh` | The single ship path, **stateless** (the bank is the ledger — stamped content hashes in `document_metadata`) and **ref-based** (ships committed content of `origin/HEAD`/`HEAD`, never the working tree). Contract enforcement, hash diff, drain-before-ship, op polling, GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
+| `schemas/` | Pluggable doc dialects: `stacked-chips` (this platform's frontmatter contract, the default) and `null` (raw passthrough). Each is `derive` + `audit-vocab.json` — see "The schema layer" |
 | `skills/hindsight-memory/` | Read patterns for every agent: reflect/recall cadence, scoping, status semantics, `tag_groups` caveats |
 | `skills/hindsight-shipping/` | Write patterns for authoring agents: frontmatter contract, gates, gotcha capture |
 | `template-fragments/` | The **fragment contract**: `hindsight-brief` / `hindsight-propose` dispatchers consumers wire into any agent's prompt (see below) |
@@ -98,13 +99,46 @@ backfill automation (rehearse via `test/` + `rebuild.md` instead), and any
 per-rig session or per-repo mental models (per-repo observation scopes
 already provide that lens).
 
-Known coupling, planned split: the stacked-chips doc schema (the `type`
-table, status/source/scope vocabularies, and tag derivation from
-`repos`/`domains`) is currently hard-coded in `ship-docs.sh`. The
-intended end-state is a pluggable schema layer — the pack core owns the
-universal mechanics (ref walk, hash diff, drain, metadata stamping, GONE)
-and ships whatever tags the schema derives, without interpreting them;
-`document_metadata` stays the pack's private bookkeeping either way.
+## The schema layer
+
+The core owns mechanics (ref walk, hash diff, drain, serialization,
+metadata stamping, GONE); a **schema** owns the dialect — what counts as
+a doc, its validation, and the derived retain fields. A schema is a
+directory:
+
+```
+schemas/<name>/
+├── derive            # executable: doc on stdin → one JSON verdict
+└── audit-vocab.json  # tag axes + closed vocabularies for the nightly audit
+```
+
+`derive` emits `{"verdict":"skip"}` (not this schema's doc),
+`{"verdict":"refuse","document_id":…,"reason":…}`, or
+`{"verdict":"ship", document_id, strategy, tags, observation_scopes,
+context, timestamp}` (optional `content` overrides the default
+frontmatter-stripped body). Warn-level findings go to stderr. The core
+provides city context via `HINDSIGHT_KNOWN_REPOS` /
+`HINDSIGHT_KNOWN_DOMAINS_FILE`. The audit reads `audit-vocab.json` from
+the same directory, so write-side dialect and audit vocabulary are one
+artifact and cannot drift.
+
+Selection: `--schema <dir>` → `$HINDSIGHT_SCHEMA` → the pack's default,
+`schemas/stacked-chips` (this platform's dialect — the frontmatter
+contract above). **One schema per run, per-city by design**: different
+dialects belong in different cities and banks. Two schemas writing one
+bank share tag space with no guarantee their vocabularies mean the same
+things — the schema layer makes writers pluggable, not vocabularies
+compatible.
+
+Also bundled: `schemas/null` — raw passthrough for users with their own
+conventions (`hindsight:` frontmatter block carrying the retain fields
+directly). No vocabulary, no derivation, no audit vocab, no protection:
+you own tag hygiene and observation-scope discipline. History says raw
+blocks rot; prefer a real dialect when one fits.
+
+A depending pack ships its own dialect by adding one directory (its
+`derive` + `audit-vocab.json`) plus the read-side skills/fragments that
+speak it — no core changes.
 
 ## The fragment contract
 

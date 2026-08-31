@@ -11,7 +11,10 @@ and committing it — not by calling the Hindsight API. The archivist's
 scheduled sync (`ship-docs.sh`) is the single ship path.
 
 Authoritative contract: `retain-contract.md` in the hindsight pack. This
-skill is the working subset for authoring agents.
+skill is the working subset for authoring agents, and documents the
+**stacked-chips schema** — the pack's default dialect
+(`schemas/stacked-chips`); a city shipping a different dialect swaps it
+via `ship --schema` and brings its own version of this skill.
 
 ## Frontmatter every shippable doc needs
 

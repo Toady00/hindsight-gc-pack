@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# stacked-chips schema — the pack's default doc dialect.
+#
+# Schema contract (what every schema's `derive` must do):
+#   stdin:  one candidate doc, whole file, frontmatter included
+#   stdout: exactly one JSON verdict —
+#     {"verdict":"skip"}                                  not this schema's doc
+#     {"verdict":"refuse","document_id":…,"reason":…}     claims to be one, malformed
+#     {"verdict":"ship","document_id":…,"strategy":…,
+#      "tags":[…],"observation_scopes":[[…]],
+#      "context":…,"timestamp":…}                         ready to retain
+#       (optional "content" overrides the core's default of
+#        frontmatter-stripped body)
+#   stderr: warn-level findings (shipped anyway), one per line
+#   env (provided by the core when available):
+#     HINDSIGHT_KNOWN_REPOS         newline-separated rig names
+#     HINDSIGHT_KNOWN_DOMAINS_FILE  known-domains file, one per line
+#
+# This dialect: five required fields (id, type, scope, source, updated_at),
+# closed vocabularies, tags derived from scope/repos/domains/type/source/
+# status, observation scopes from domains/repos/scope only (never
+# status/source/type — epistemic fields must not fragment consolidation).
+set -euo pipefail
+
+FILE="$(mktemp)"; trap 'rm -f "$FILE"' EXIT
+cat > "$FILE"
+
+head -1 "$FILE" | grep -q '^---[[:space:]]*$' || { echo '{"verdict":"skip"}'; exit 0; }
+
+fm()  { yq --front-matter=extract "$1" "$FILE"; }
+fmj() { yq --front-matter=extract -o=json "$1" "$FILE"; }
+
+doc_id="$(fm '.id // ""')"
+type="$(fm '.type // ""')"
+[[ -n "$doc_id" && -n "$type" ]] && [[ "$doc_id" != "null" && "$type" != "null" ]] \
+  || { echo '{"verdict":"skip"}'; exit 0; }
+
+refuse() {
+  jq -cn --arg id "$doc_id" --arg r "$1" '{verdict:"refuse",document_id:$id,reason:$r}'
+  exit 0
+}
+
+strategy_for() {
+  case "$1" in
+    adr|spec|hld) echo design-record ;;
+    prd|user-journey) echo product-doc ;;
+    methodology) echo methodology ;;
+    convention) echo convention ;;
+    current-state) echo current-state ;;
+    meeting-notes|discussion) echo discussion ;;
+    voice-memo) echo voice-memo ;;
+    build-report) echo build-report ;;
+    runbook) echo operational-runbook ;;
+    gotcha) echo gotcha ;;
+    external) echo source-document ;;
+    *) return 1 ;;
+  esac
+}
+
+title="$(fm '.title // ""')"
+status="$(fm '.status // ""')"
+source="$(fm '.source // ""')"
+scope="$(fm '.scope // ""')"
+updated="$(fm '.updated_at // ""')"
+repos_json="$(fmj '.repos // []' | jq -c .)"
+domains_json="$(fmj '.domains // []' | jq -c .)"
+
+strategy="$(strategy_for "$type")" || refuse "unknown type '$type'"
+case "$scope" in business|platform|repo) ;; *) refuse "bad scope '$scope'" ;; esac
+case "$source" in human|agent|external) ;; *) refuse "bad source '$source'" ;; esac
+if [[ -n "$status" && "$status" != "null" ]]; then
+  case "$status" in draft|accepted|superseded|deprecated) ;; *) refuse "bad status '$status'" ;; esac
+else
+  status=""
+fi
+[[ -n "$updated" && "$updated" != "null" ]] || refuse "missing updated_at"
+
+# warn-level: repo values against the rig registry, domains against the vocab
+if [[ -n "${HINDSIGHT_KNOWN_REPOS:-}" ]]; then
+  while IFS= read -r r; do
+    [[ -z "$r" ]] && continue
+    grep -qx "$r" <<<"$HINDSIGHT_KNOWN_REPOS" \
+      || echo "WARN     $doc_id: repo '$r' matches no rig in this city" >&2
+  done < <(jq -r '.[]' <<<"$repos_json")
+fi
+if [[ -n "${HINDSIGHT_KNOWN_DOMAINS_FILE:-}" && -f "${HINDSIGHT_KNOWN_DOMAINS_FILE:-}" ]]; then
+  while IFS= read -r d; do
+    [[ -z "$d" ]] && continue
+    grep -qx "$d" "$HINDSIGHT_KNOWN_DOMAINS_FILE" \
+      || echo "WARN     $doc_id: new domain '$d' not in $HINDSIGHT_KNOWN_DOMAINS_FILE" >&2
+  done < <(jq -r '.[]' <<<"$domains_json")
+fi
+
+if [[ "$type" == "voice-memo" ]]; then
+  context="owner voice memo, unstructured thinking, not a decision"
+else
+  context="$type: $title"
+  dj="$(jq -r 'join(", ")' <<<"$domains_json")"; [[ -n "$dj" ]] && context+=" — domain $dj"
+  rj="$(jq -r 'join(", ")' <<<"$repos_json")";   [[ -n "$rj" ]] && context+=", repo $rj"
+  case "$status" in
+    draft) context+="; DRAFT, a proposal subject to change, not current platform direction" ;;
+    superseded) context+="; SUPERSEDED, retained as history, not current platform direction" ;;
+    deprecated) context+="; DEPRECATED, no longer holds" ;;
+  esac
+fi
+
+tags="$(jq -cn --arg scope "$scope" --arg type "$type" --arg source "$source" --arg status "$status" \
+  --argjson repos "$repos_json" --argjson domains "$domains_json" '
+  ["scope:\($scope)"] + ($repos | map("repo:\(.)")) + ($domains | map("domain:\(.)"))
+  + ["memory_type:\($type)", "source:\($source)"]
+  + (if $status != "" then ["status:\($status)"] else [] end)')"
+oscopes="$(jq -cn --arg scope "$scope" --argjson repos "$repos_json" --argjson domains "$domains_json" '
+  ($domains | map(["domain:\(.)"])) + ($repos | map(["repo:\(.)"])) + [["scope:\($scope)"]]')"
+
+jq -cn --arg id "$doc_id" --arg strategy "$strategy" --arg context "$context" --arg ts "$updated" \
+  --argjson tags "$tags" --argjson oscopes "$oscopes" '
+  {verdict:"ship", document_id:$id, strategy:$strategy, tags:$tags,
+   observation_scopes:$oscopes, context:$context, timestamp:$ts}'

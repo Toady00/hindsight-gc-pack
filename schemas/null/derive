@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# null schema — raw passthrough for users who bring their own conventions.
+#
+# A doc opts in with a `hindsight:` frontmatter block carrying the retain
+# fields directly. No vocabulary, no derivation, no opinions — and no
+# protection: you own tag hygiene, observation-scope discipline (epistemic
+# fields in scopes will fragment consolidation), and your own audit
+# vocabulary (there is no audit-vocab.json here, so the tag audit runs
+# structural checks only). History says raw blocks rot; prefer a real
+# schema dialect when one fits.
+#
+#   ---
+#   hindsight:
+#     id: my.doc.0001                 # required
+#     strategy: design-record        # required, a hindsight retain strategy
+#     tags: [team:eng, kind:spec]    # optional
+#     observation_scopes: [[team:eng]]   # optional (default: combined)
+#     context: "spec: my doc"        # optional
+#     timestamp: 2026-08-30T00:00:00Z    # optional (default: now)
+#   ---
+set -euo pipefail
+
+FILE="$(mktemp)"; trap 'rm -f "$FILE"' EXIT
+cat > "$FILE"
+
+head -1 "$FILE" | grep -q '^---[[:space:]]*$' || { echo '{"verdict":"skip"}'; exit 0; }
+
+hs="$(yq --front-matter=extract -o=json '.hindsight // null' "$FILE" | jq -c .)"
+[[ "$hs" != "null" ]] || { echo '{"verdict":"skip"}'; exit 0; }
+
+doc_id="$(jq -r '.id // ""' <<<"$hs")"
+strategy="$(jq -r '.strategy // ""' <<<"$hs")"
+[[ -n "$doc_id" ]] || { jq -cn '{verdict:"refuse",document_id:"?",reason:"hindsight block missing id"}'; exit 0; }
+[[ -n "$strategy" ]] || { jq -cn --arg id "$doc_id" '{verdict:"refuse",document_id:$id,reason:"hindsight block missing strategy"}'; exit 0; }
+
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+jq -cn --arg now "$NOW" --argjson hs "$hs" '
+  {verdict:"ship",
+   document_id: $hs.id,
+   strategy: $hs.strategy,
+   tags: ($hs.tags // []),
+   observation_scopes: ($hs.observation_scopes // "combined"),
+   context: ($hs.context // ""),
+   timestamp: ($hs.timestamp // $now)}'

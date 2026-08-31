@@ -1,0 +1,10 @@
+{
+  "axes": ["scope", "repo", "domain", "memory_type", "source", "status"],
+  "closed": {
+    "scope": ["business", "platform", "repo"],
+    "source": ["human", "agent", "external"],
+    "status": ["draft", "accepted", "superseded", "deprecated"],
+    "memory_type": ["adr", "spec", "hld", "prd", "user-journey", "methodology", "convention", "current-state", "meeting-notes", "discussion", "voice-memo", "build-report", "runbook", "gotcha", "external"]
+  },
+  "repo_axis_is_rig_registry": true
+}

@@ -39,6 +39,12 @@
 #                          ships as-fetched; never fatal). Off by default —
 #                          the scheduled order opts in; ad-hoc runs decide.
 #   --domains <file>       known-domains file, one per line (warn on new values)
+#   --schema <dir>         schema directory: what counts as a doc, its
+#                          validation, and the derived retain fields
+#                          (default: $HINDSIGHT_SCHEMA, else the pack's
+#                          schemas/stacked-chips). One schema per run —
+#                          different dialects belong in different cities.
+#                          See schemas/stacked-chips/derive for the contract.
 #   --drain-timeout <sec>  max wait for in-flight bank operations (default 300)
 #   --dry-run              validate + diff + report only, write nothing
 #
@@ -74,6 +80,7 @@ API="${HINDSIGHT_API:-https://hindsight-api.brandondennis.me}"
 BANK=""
 REF_OVERRIDE=""
 DOMAINS_FILE=""
+SCHEMA_DIR=""
 DRAIN_TIMEOUT=300
 DRY_RUN=false
 FETCH=false
@@ -85,6 +92,7 @@ while [[ $# -gt 0 ]]; do
     --api) API="$2"; shift 2 ;;
     --ref) REF_OVERRIDE="$2"; shift 2 ;;
     --domains) DOMAINS_FILE="$2"; shift 2 ;;
+    --schema) SCHEMA_DIR="$2"; shift 2 ;;
     --drain-timeout) DRAIN_TIMEOUT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --fetch) FETCH=true; shift ;;
@@ -96,32 +104,26 @@ done
 [[ -n "$BANK" ]] || { echo "no bank: set HINDSIGHT_BANK in [workspace] env, or pass --bank <id>" >&2; exit 2; }
 [[ ${#ROOTS[@]} -gt 0 ]] || { echo "at least one docs root is required" >&2; exit 2; }
 
+# The schema is the dialect: it decides what counts as a doc, validates it,
+# and derives the retain fields. One schema per run — per-city by design
+# (different dialects belong in different cities/banks). This core knows
+# no vocabulary at all.
+PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+[[ -n "$SCHEMA_DIR" ]] || SCHEMA_DIR="${HINDSIGHT_SCHEMA:-$PACK_DIR/schemas/stacked-chips}"
+DERIVE="$SCHEMA_DIR/derive"
+[[ -x "$DERIVE" ]] || { echo "schema '$SCHEMA_DIR' has no executable derive" >&2; exit 2; }
+
 TMP="$(mktemp -d)"
 SEEN="$TMP/seen-ids.tsv"; : > "$SEEN"
 
-# Known repos: the city rig list is the registry. Soft dependency — outside
-# a city (or if gc is unavailable) we warn instead of validating.
-KNOWN_REPOS=""
+# City context for schemas (warn-level checks): the rig registry and the
+# domains vocab travel by env per the schema contract. Soft dependency —
+# outside a city (or without gc) schemas simply skip those checks.
+export HINDSIGHT_KNOWN_DOMAINS_FILE="$DOMAINS_FILE"
+export HINDSIGHT_KNOWN_REPOS=""
 if command -v gc >/dev/null 2>&1; then
-  KNOWN_REPOS="$(gc rig list --json 2>/dev/null | jq -r '.rigs[]?.name // empty' 2>/dev/null | sort -u || true)"
+  HINDSIGHT_KNOWN_REPOS="$(gc rig list --json 2>/dev/null | jq -r '.rigs[]?.name // empty' 2>/dev/null | sort -u || true)"
 fi
-
-strategy_for() {
-  case "$1" in
-    adr|spec|hld) echo design-record ;;
-    prd|user-journey) echo product-doc ;;
-    methodology) echo methodology ;;
-    convention) echo convention ;;
-    current-state) echo current-state ;;
-    meeting-notes|discussion) echo discussion ;;
-    voice-memo) echo voice-memo ;;
-    build-report) echo build-report ;;
-    runbook) echo operational-runbook ;;
-    gotcha) echo gotcha ;;
-    external) echo source-document ;;
-    *) return 1 ;;
-  esac
-}
 
 op_status() { hindsight -o json operation get "$BANK" "$1" 2>/dev/null | jq -r '.status // "unknown"'; }
 
@@ -261,14 +263,17 @@ while IFS=$'\t' read -r repo_name repo_base ref p; do
     relpath="$p"
   fi
 
-  head -1 "$FILE" | grep -q '^---[[:space:]]*$' || continue   # no frontmatter: not a shippable doc
-
-  fm()  { yq --front-matter=extract "$1" "$FILE"; }
-  fmj() { yq --front-matter=extract -o=json "$1" "$FILE"; }
-
-  doc_id="$(fm '.id // ""')"
-  type="$(fm '.type // ""')"
-  [[ -n "$doc_id" && -n "$type" ]] || continue                # frontmatter but no id/type: not ours
+  # ---- the schema decides: skip / refuse / ship + derived fields ----
+  verdict="$("$DERIVE" < "$FILE")" || { echo "FAILED   $display: schema derive errored" >&2; FAILED=$((FAILED+1)); continue; }
+  case "$(jq -r '.verdict // "invalid"' <<<"$verdict")" in
+    skip) continue ;;
+    refuse)
+      refuse "$(jq -r '.document_id // "?"' <<<"$verdict")" "$(jq -r '.reason // "unspecified"' <<<"$verdict")"
+      continue ;;
+    ship) ;;
+    *) echo "FAILED   $display: schema emitted invalid verdict: $verdict" >&2; FAILED=$((FAILED+1)); continue ;;
+  esac
+  doc_id="$(jq -r '.document_id' <<<"$verdict")"
 
   # duplicate id within this walk: two published files claiming one
   # document_id would silently last-writer-win in the bank. Refuse the second.
@@ -279,38 +284,7 @@ while IFS=$'\t' read -r repo_name repo_base ref p; do
   fi
   printf '%s\t%s\n' "$doc_id" "$display" >> "$SEEN"
 
-  title="$(fm '.title // ""')"
-  status="$(fm '.status // ""')"
-  source="$(fm '.source // ""')"
-  scope="$(fm '.scope // ""')"
-  updated="$(fm '.updated_at // ""')"
-  repos_json="$(fmj '.repos // []' | jq -c .)"
-  domains_json="$(fmj '.domains // []' | jq -c .)"
-
-  # ---- validation: the shipper is the enforcement point ----
-  strategy="$(strategy_for "$type")" || { refuse "$doc_id" "unknown type '$type'"; continue; }
-  case "$scope" in business|platform|repo) ;; *) refuse "$doc_id" "bad scope '$scope'"; continue ;; esac
-  case "$source" in human|agent|external) ;; *) refuse "$doc_id" "bad source '$source'"; continue ;; esac
-  if [[ -n "$status" ]]; then
-    case "$status" in draft|accepted|superseded|deprecated) ;; *) refuse "$doc_id" "bad status '$status'"; continue ;; esac
-  fi
-  [[ -n "$updated" ]] || { refuse "$doc_id" "missing updated_at"; continue; }
-
   # repo: values against the rig registry (warn-only when registry absent)
-  while IFS= read -r r; do
-    [[ -z "$r" ]] && continue
-    if [[ -n "$KNOWN_REPOS" ]] && ! grep -qx "$r" <<<"$KNOWN_REPOS"; then
-      echo "WARN     $doc_id: repo '$r' matches no rig in this city" >&2
-    fi
-  done < <(jq -r '.[]' <<<"$repos_json")
-  # domain: values against the vocab file (warn-only)
-  if [[ -n "$DOMAINS_FILE" && -f "$DOMAINS_FILE" ]]; then
-    while IFS= read -r d; do
-      [[ -z "$d" ]] && continue
-      grep -qx "$d" "$DOMAINS_FILE" || echo "WARN     $doc_id: new domain '$d' not in $DOMAINS_FILE" >&2
-    done < <(jq -r '.[]' <<<"$domains_json")
-  fi
-
   # ---- change detection: our hash vs the bank's stamped hash ----
   hash="$(shasum -a 256 "$FILE" | cut -d' ' -f1)"
   bank_hash="$(jq -r --arg id "$doc_id" '.[$id].hash // "absent"' "$TMP/bank-map.json")"
@@ -318,33 +292,18 @@ while IFS=$'\t' read -r repo_name repo_base ref p; do
 
   if $DRY_RUN; then echo "WOULD SHIP $doc_id ($display)"; SHIPPED=$((SHIPPED+1)); continue; fi
 
-  # ---- payload per retain-contract.md ----
-  body="$(awk 'f{print} /^---[[:space:]]*$/{c++; if(c==2)f=1}' "$FILE")"
-  if [[ "$type" == "voice-memo" ]]; then
-    context="owner voice memo, unstructured thinking, not a decision"
-  else
-    context="$type: $title"
-    dj="$(jq -r 'join(", ")' <<<"$domains_json")"; [[ -n "$dj" ]] && context+=" — domain $dj"
-    rj="$(jq -r 'join(", ")' <<<"$repos_json")";   [[ -n "$rj" ]] && context+=", repo $rj"
-    case "$status" in
-      draft) context+="; DRAFT, a proposal subject to change, not current platform direction" ;;
-      superseded) context+="; SUPERSEDED, retained as history, not current platform direction" ;;
-      deprecated) context+="; DEPRECATED, no longer holds" ;;
-    esac
-  fi
-  tags="$(jq -cn --arg scope "$scope" --arg type "$type" --arg source "$source" --arg status "$status" \
-    --argjson repos "$repos_json" --argjson domains "$domains_json" '
-    ["scope:\($scope)"] + ($repos | map("repo:\(.)")) + ($domains | map("domain:\(.)"))
-    + ["memory_type:\($type)", "source:\($source)"]
-    + (if $status != "" then ["status:\($status)"] else [] end)')"
-  oscopes="$(jq -cn --arg scope "$scope" --argjson repos "$repos_json" --argjson domains "$domains_json" '
-    ($domains | map(["domain:\(.)"])) + ($repos | map(["repo:\(.)"])) + [["scope:\($scope)"]]')"
-  payload="$(jq -cn --arg content "$body" --arg doc_id "$doc_id" --arg context "$context" \
-    --arg ts "$updated" --arg strategy "$strategy" \
+  # ---- payload: schema fields + core bookkeeping ----
+  # Content defaults to the frontmatter-stripped body; a schema may
+  # override it via a "content" key. The metadata stamp stays the core's:
+  # content_hash/repo/relpath drive the differ and GONE, never the schema.
+  body="$(jq -r '.content // empty' <<<"$verdict")"
+  [[ -n "$body" ]] || body="$(awk 'f{print} /^---[[:space:]]*$/{c++; if(c==2)f=1}' "$FILE")"
+  payload="$(jq -cn --arg content "$body" \
     --arg hash "$hash" --arg repo "$repo_name" --arg relpath "$relpath" \
-    --argjson tags "$tags" --argjson oscopes "$oscopes" '
-    {items: [{content: $content, document_id: $doc_id, context: $context, timestamp: $ts,
-              strategy: $strategy, tags: $tags, observation_scopes: $oscopes,
+    --argjson v "$verdict" '
+    {items: [{content: $content, document_id: $v.document_id, context: $v.context,
+              timestamp: $v.timestamp, strategy: $v.strategy, tags: $v.tags,
+              observation_scopes: $v.observation_scopes,
               metadata: {content_hash: $hash, repo: $repo, relpath: $relpath}}],
      async: true}')"
 

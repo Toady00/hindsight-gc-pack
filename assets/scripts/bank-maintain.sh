@@ -12,6 +12,13 @@
 #                          own bank in [workspace] env)
 #   --api <url>            Hindsight API base (default: $HINDSIGHT_API or prod)
 #   --domains <file>       known-domains file, one per line (audit check d)
+#   --schema <dir>         schema directory whose audit-vocab.json defines
+#                          the tag axes and closed vocabularies (default:
+#                          $HINDSIGHT_SCHEMA, else the pack's
+#                          schemas/stacked-chips). Write-side dialect and
+#                          audit vocabulary are one artifact — they cannot
+#                          drift. A schema with no audit-vocab.json gets
+#                          structural checks only (c/e).
 #   --drain-timeout <sec>  max wait for in-flight operations (default 600)
 #   --skip-consolidate     drain + audit only
 #
@@ -22,9 +29,11 @@
 #   4  consolidation failed even after one recover+retry
 #
 # Tag audit checks (all deterministic):
-#   a. axis check      every tag starts with one of the six axes
-#   b. vocabulary      scope/source/status/memory_type values are contract-legal
-#   c. rig registry    repo: values exist in `gc rig list` (when available)
+#   a. axis check      every tag starts with a schema-declared axis
+#   b. vocabulary      values of closed axes are schema-legal
+#   c. rig registry    repo: values exist in `gc rig list` (when available,
+#                      and only if the schema marks the repo axis as the
+#                      rig registry)
 #   d. domain vocab    domain: values appear in --domains file (when given)
 #   e. near-duplicates case-fold collisions and Levenshtein<=2 value pairs
 #                      within the same axis (len>3, to skip short-value noise)
@@ -38,6 +47,7 @@ set -euo pipefail
 API="${HINDSIGHT_API:-https://hindsight-api.brandondennis.me}"
 BANK=""
 DOMAINS_FILE=""
+SCHEMA_DIR=""
 DRAIN_TIMEOUT=600
 SKIP_CONSOLIDATE=false
 
@@ -46,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --bank) BANK="$2"; shift 2 ;;
     --api) API="$2"; shift 2 ;;
     --domains) DOMAINS_FILE="$2"; shift 2 ;;
+    --schema) SCHEMA_DIR="$2"; shift 2 ;;
     --drain-timeout) DRAIN_TIMEOUT="$2"; shift 2 ;;
     --skip-consolidate) SKIP_CONSOLIDATE=true; shift ;;
     *) echo "unknown arg: $1" >&2; exit 64 ;;
@@ -53,6 +64,11 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$BANK" ]] || BANK="${HINDSIGHT_BANK:-}"
 [[ -n "$BANK" ]] || { echo "no bank: set HINDSIGHT_BANK in [workspace] env, or pass --bank <id>" >&2; exit 64; }
+
+PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+[[ -n "$SCHEMA_DIR" ]] || SCHEMA_DIR="${HINDSIGHT_SCHEMA:-$PACK_DIR/schemas/stacked-chips}"
+VOCAB="$SCHEMA_DIR/audit-vocab.json"
+[[ -f "$VOCAB" ]] || VOCAB=""
 
 TMP="$(mktemp -d)"
 TAGFILE="${TMPDIR:-/tmp}/hindsight-tag-audit.$BANK.json"
@@ -104,24 +120,27 @@ jq -r '.items[]?.tag // empty' "$TAGFILE" | sort -u > "$TMP/tags.txt"
 : > "$TMP/findings.txt"
 [[ -f "$TMP/findings.txt.pre" ]] && cat "$TMP/findings.txt.pre" >> "$TMP/findings.txt"
 
-# a. axis check
-grep -Ev '^(scope|repo|domain|memory_type|source|status):' "$TMP/tags.txt" \
-  | sed 's/^/UNKNOWN-AXIS  /' >> "$TMP/findings.txt" || true
+# a. axis check — axes come from the schema's audit vocab
+if [[ -n "$VOCAB" ]]; then
+  AXES_RE="$(jq -r '.axes | join("|")' "$VOCAB")"
+  grep -Ev "^($AXES_RE):" "$TMP/tags.txt" \
+    | sed 's/^/UNKNOWN-AXIS  /' >> "$TMP/findings.txt" || true
+fi
 
-# b. vocabulary check
-while IFS= read -r tag; do
-  axis="${tag%%:*}"; val="${tag#*:}"
-  case "$axis" in
-    scope)  grep -qx "$val" <<<$'business\nplatform\nrepo' || echo "BAD-VALUE     $tag" ;;
-    source) grep -qx "$val" <<<$'human\nagent\nexternal' || echo "BAD-VALUE     $tag" ;;
-    status) grep -qx "$val" <<<$'draft\naccepted\nsuperseded\ndeprecated' || echo "BAD-VALUE     $tag" ;;
-    memory_type) grep -qx "$val" <<<$'adr\nspec\nhld\nprd\nuser-journey\nmethodology\nconvention\ncurrent-state\nmeeting-notes\ndiscussion\nvoice-memo\nbuild-report\nrunbook\ngotcha\nexternal' \
-      || echo "BAD-VALUE     $tag" ;;
-  esac
-done < "$TMP/tags.txt" >> "$TMP/findings.txt"
+# b. vocabulary check — closed axes come from the schema's audit vocab
+if [[ -n "$VOCAB" ]]; then
+  while IFS= read -r tag; do
+    axis="${tag%%:*}"; val="${tag#*:}"
+    allowed="$(jq -r --arg a "$axis" '.closed[$a] // empty | .[]' "$VOCAB")"
+    [[ -z "$allowed" ]] && continue
+    grep -qx "$val" <<<"$allowed" || echo "BAD-VALUE     $tag"
+  done < "$TMP/tags.txt" >> "$TMP/findings.txt"
+fi
 
-# c. repo values against the rig registry (soft dependency)
-if command -v gc >/dev/null 2>&1; then
+# c. repo values against the rig registry (soft dependency; only when the
+#    schema declares the repo axis maps to the rig registry)
+if command -v gc >/dev/null 2>&1 \
+  && [[ -n "$VOCAB" && "$(jq -r '.repo_axis_is_rig_registry // false' "$VOCAB")" == "true" ]]; then
   gc rig list --json 2>/dev/null | jq -r '.[].name' 2>/dev/null | sort -u > "$TMP/rigs.txt" || true
   if [[ -s "$TMP/rigs.txt" ]]; then
     grep '^repo:' "$TMP/tags.txt" | sed 's/^repo://' | while IFS= read -r r; do
