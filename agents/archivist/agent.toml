@@ -5,13 +5,18 @@
 # future replace can reach (verified live, 2026-08-25).
 # One archivist session at a time makes the single-writer rule structural
 # instead of aspirational. Do not raise it.
+#
+# Do not add min_active_sessions (even = 0) or scale_check. max = 1 alone
+# is the named-singleton shape gc expects behind a [[named_session]]; any
+# explicit min flips it to pool semantics and `gc lint` rejects the pack
+# ("named_session targets pool-controlled agent"). The effective minimum
+# is 0 either way — the session is materialized on demand.
 
 scope = "city"
 wake_mode = "fresh"
 work_dir = ".gc/agents/archivist"
 nudge = "Run gc hook --claim --json now; if it returns work, execute the claimed formula immediately."
 idle_timeout = "30m"
-min_active_sessions = 0
 max_active_sessions = 1
 
 # The arbitration policy for agent memory proposals (see
