@@ -1,0 +1,14 @@
+# Install once per clone: `lefthook install` (needs lefthook and gc on PATH).
+#
+# `gc lint .` walks every pack.toml below the repo root and fails (exit 1)
+# on pack-level contract violations — e.g. a [[named_session]] whose agent
+# carries pool controls (min_active_sessions / scale_check), or a prompt
+# template with a missing key. It runs in well under a second, so it is not
+# glob-restricted: nearly every tracked directory is pack surface (agents/,
+# formulas/, orders/, template-fragments/, pack.toml). Lefthook only skips
+# it when the index is empty (`git commit --allow-empty`), where there is
+# nothing to lint; deletion-only commits still run it (verified, 2.1.12).
+pre-commit:
+  commands:
+    gc-lint:
+      run: gc lint .
