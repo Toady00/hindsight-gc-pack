@@ -5,9 +5,15 @@ block for OMG, platform-agnostic by design. One bank spanning every
 repository and domain, scoped down to a single rig on demand; a
 city-scoped archivist as the bank's single writer.
 
-Built against Hindsight **0.9.1**. No server is ever defaulted: the API
-resolves `--api` → `$HINDSIGHT_API` → the hindsight CLI's own config
-(`~/.hindsight/config` `api_url`) → loud refusal.
+Templates were built against local Hindsight **0.9.1/0.9.2** servers. Document
+shipping requires `/openapi.json` to advertise client `operation_id` and boolean
+`async` on `RetainRequest`; unsupported servers are refused before retain.
+No server is defaulted. Endpoint precedence is `--api`, `HINDSIGHT_API`,
+`HINDSIGHT_API_URL`, then the selected CLI profile/config, otherwise refusal.
+`HINDSIGHT_PROFILE` selects `~/.hindsight/cli-profiles/<name>.toml`; without a
+profile, `HINDSIGHT_CONFIG` selects a file or defaults to `~/.hindsight/config`.
+Credentials come from `HINDSIGHT_API_KEY`, or the config only when its endpoint
+is used. Explicit endpoints never borrow another endpoint's config credentials.
 
 ## The bank template
 
@@ -40,7 +46,8 @@ extraction and apply forward-only (see "Two properties worth knowing").
 | `orders/ship-sync.toml` | Hourly convergence backstop — makes all other ship triggers non-load-bearing |
 | `orders/consolidate.toml` | Nightly audit + consolidation backstop |
 | `commands/ship/` | `gc <binding> ship` — ship the docs manually at any point (auto-resolves roots; owns `--dry-run` for previews). Pack commands are namespaced by the import binding, so `[imports.hindsight]` makes it `gc hindsight ship` |
-| `assets/scripts/ship-docs.sh` | The docs-corpus ship path, **stateless** (the bank is the ledger — stamped content hashes in `document_metadata`) and **ref-based** (ships committed content of `origin/HEAD`/`HEAD`, never the working tree). Schema-driven validation, hash diff, drain-before-ship, op polling, GONE reports |
+| `commands/read/`, `commands/maintain/`, `commands/retain/`, `commands/status/` | `gc hindsight read`, `gc hindsight maintain`, `gc hindsight retain`, `gc hindsight status`: reads, guarded maintenance and bank-native retention, and shared Beads health |
+| `assets/scripts/ship-docs.sh` | Git-only docs shipping from freshly fetched origin branches. Shared Beads receipts track intent, recovery and confirmed completion; bank hashes alone never prove success. Validation, drain-before-ship, operation polling and GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
 | `schemas/` | Pluggable doc dialects: `docs` (the pack's frontmatter contract, the default) and `null` (raw passthrough). Each is `derive` + `audit-vocab.json` — see "The schema layer" |
@@ -56,8 +63,9 @@ Install into a city (path import while the pack is local):
 source = "../hindsight"
 ```
 
-referenced from `workspace.pack` so the archivist expands city-scoped.
+Place that import in `city.toml` so the archivist expands city-scoped.
 Rig agents need no sessions from this pack — they consume the two skills.
+The pack commands in prompts and formulas use the `hindsight` import binding.
 
 ## Using this pack
 
@@ -78,10 +86,13 @@ Every path in one place. Details for each live in the sections below.
 **Doc author (human or agent) — publish a doc:**
 
 Write markdown with the frontmatter contract (see the
-`hindsight-shipping` skill), put it in a walked docs tree, commit to the
-canonical branch. Commit **is** publish; it ships within the hour.
-Impatient or previewing: `gc hindsight ship` / `gc hindsight ship
---dry-run` (the first word after `gc` is your import binding name).
+`hindsight-shipping` skill), put it in a configured Git docs tree, then commit
+and push to the canonical branch. Push publishes it for the next scan, including
+`status: draft` documents. `gc hindsight ship` queues the archivist outside its
+managed session; exit 0 means queued, not shipped. Follow the formula bead for
+completion. `gc hindsight ship --dry-run` previews locally without retaining or
+updating health, but still fetches Git and reads the bank and city Beads store.
+The first word after `gc` is your import binding name.
 Revise by editing in place; retire with `status: deprecated` — never
 delete.
 
@@ -123,14 +134,20 @@ overreach) and runs a consolidation backstop; findings reach you by
 mail from the archivist. Removing something on purpose is manual by
 design — see "Deleting from the bank".
 
+`gc hindsight status` reads shared Beads health and unresolved document attempts
+without calling the bank. Use `gc hindsight maintain` for maintenance and
+`gc hindsight retain` for arbitrated bank-native memories, only in the managed
+archivist. Use `gc hindsight read` for read operations. See
+[OPERATIONS.md](OPERATIONS.md) for connection settings, bootstrap and recovery.
+
 ## The shipping contract
 
 The pack's public promise to any doc producer — platform docs, someone
 else's docs, any schema — is four rules:
 
-1. **Publish.** Put a doc with conforming frontmatter on your publish
-   boundary — the canonical branch of a walked docs tree. It ships within
-   the order interval (or immediately via the `ship` command).
+1. **Publish.** Push a doc with conforming frontmatter to the canonical branch
+   of a configured Git docs tree. The next scheduled scan or queued
+   `gc hindsight ship` request reconciles it; check the result for completion.
 2. **Revise.** Change it there and it re-ships, replacing its previous
    self in the bank (`document_id` replace). Change detection is a content
    hash of the whole file, so *any* change ships — frontmatter included.
@@ -142,27 +159,73 @@ else's docs, any schema — is four rules:
    who approves, when status flips — that belongs to your doc schema and
    your workflow pack, and reaches this pack only as content changes.
 
-Lifecycle policy is expressed by **where you commit**, not by pack
-configuration. A draft you want visible platform-wide goes on the
-canonical branch with `status: draft`; a draft not ready for anyone stays
-on a private branch, invisible to the pack by construction. Branch =
-privacy. Status = epistemic standing of published content. The pack has
-no opinion and no knob.
+Publication is determined by **where you push**. A draft pushed to the canonical
+branch with `status: draft` is visible. Status records the standing of published
+content; it does not gate ingestion, and no accepted-source filter is added.
+A private or unpushed branch is excluded from the default scan. An explicit
+`--ref` can select another published branch, so do not use it for private drafts.
 
-> The walker reads the **committed content of each root's canonical ref**
-> (`--ref` override → `origin/HEAD` → local `HEAD`), never the working
-> tree — a branch switch or dirty worktree at order time cannot leak
-> unpublished content into the bank, and untracked files are simply
-> unpublished. A root outside any git repo falls back to walking the
-> filesystem, so git is the recommended publish boundary, not a
-> requirement.
+Every scan freshly fetches `origin`, including dry-runs. The default branch
+comes from the remote's advertised HEAD, not a cached `origin/HEAD` or local
+HEAD. `--ref` accepts a published branch as `foo`, `origin/foo`, `refs/heads/foo`
+or `refs/remotes/origin/foo`; local HEAD, SHAs, tags and local-only branches are
+unsupported. `--fetch` is retained for existing callers but is a no-op because
+all scans fetch. The shipper reads the fetched commit's blobs, never worktree
+content. Branch switches, dirty files and untracked files are irrelevant.
 
-**Status:** the bank design, retain contract, shipper logic, and query
-patterns are validated against a live test bank (see `test/results/`).
-The Gas City wiring — order scheduling, pool routing to the archivist,
-formula dispatch — follows the gastown pack's conventions but has not yet
-been exercised in a running city. Treat `pack.toml`, `orders/`, and
-`agents/archivist/agent.toml` as reviewed-not-run.
+Every root must belong to Git, including worktrees; there is no filesystem
+fallback. Automatic scans include every registered rig's `docs/` even when
+absent from its checkout, plus `HINDSIGHT_DOCS_ROOTS`. City-root `docs/` is
+also scanned when the city belongs to Git, even if absent locally. A missing rig
+repository fails coverage; docs absent from the fetched tree form a valid empty
+inventory for GONE checks. Any fetch, tree-listing or blob-read failure stops the
+entire scan before new retains. Source records for the Git docs/code corpus
+carry stable origin-based repository identity, relative path, branch and commit
+SHA. Bank-native memories remain a separate write path.
+
+### Shared shipping ledger
+
+Shipping is not stateless. Durable Beads records in the shared city SQL database
+hold document attempts and successful receipts as custom type
+`hindsight-document`, and bank health as `hindsight-bank`. Both remain lifecycle
+status `pinned`, unassigned and unrouted, not ready tasks. Commands explicitly
+address the city store through absolute `GC_CITY_PATH`, never cwd-based rig
+routing. Normal metadata updates need no force. There is no shared lock;
+exactly one active archivist must own each writable bank.
+
+`metadata.hindsight` holds `schema_version: 1` and `api`, `bank`, `kind`,
+`document_id` identity. Its `.data` contains document `attempt`, `last_success`
+and `source`, or bank `latest_run`, `latest_full_scan` and `last_success`.
+Before retain POST, the shipper persists a UUID operation intent and full request
+snapshot. It confirms completion before recording success. The next run recovers
+the original unresolved operation with bounded retry, even after a machine
+handoff. Successful completion removes the payload from current metadata, but
+Dolt history retains earlier values, including source content.
+
+A matching bank content hash can survive a failed streaming retain. Skipping
+therefore requires a matching successful Beads receipt as well as the bank hash.
+For missing receipts or unknown success, review `gc hindsight ship --dry-run`,
+then run a real scan to re-ingest once and establish receipts. Invalid records
+require repair, not blind bootstrap. `gc hindsight status` queries this shared
+store, not the live bank, for freshness and unresolved attempts. Partial scans
+cannot refresh the successful full-scan timestamp. There is no
+`HINDSIGHT_STATE_DIR` health journal to copy between hosts.
+
+For extraction-setting changes, preview and request `gc hindsight ship
+--reprocess`. It retains current source first, then calls the server's document
+reprocess endpoint. The endpoint is not caller-idempotent. A lost acknowledgement
+leaves phase `reprocess_prepared` and blocks recovery until a human identifies
+the actual operation and repairs `metadata.hindsight.data.attempt` with
+`reprocess_operation_id` and phase `reprocess_wait`. Never blindly retry the
+POST. This requests reprocessing, not a verified guarantee of server-side
+unchanged-chunk invalidation. See [OPERATIONS.md](OPERATIONS.md) for repair details.
+
+**Verification:** `test/results/` records the original live-bank experiment,
+not proof of the current shared-Beads recovery and Git-only shipping path.
+The offline suite exercises production scripts with mocked services; see
+[test/README.md](test/README.md) for its unchanged command and the separate
+optional live evaluation. Order scheduling and archivist routing still need
+verification in a running city; lint and offline tests do not prove that wiring.
 
 Deliberately not in the pack (yet): a git-hook ship trigger (optional
 immediacy, never load-bearing — add per-repo later if wanted), bulk
@@ -249,7 +312,8 @@ Declared in TOML like all city config; env is the delivery mechanism.
 | Var | Where | Meaning |
 |---|---|---|
 | `HINDSIGHT_BANK` | `[workspace] env` — once per city, **required** | Bank id. No hardcoded default anywhere — scripts, command, and formulas fail loudly when unset. Process-env only (workspace env is not template-visible), which is why fragment prose references it as `$HINDSIGHT_BANK`. 1:1 city-to-bank is the intended shape; a per-agent `env` override is the escape hatch |
-| `HINDSIGHT_API` | `[workspace] env`, optional | API base URL. Resolution everywhere: `--api` flag → this var → `~/.hindsight/config` `api_url` → loud refusal. No server is ever a hardcoded default |
+| `HINDSIGHT_API` | `[workspace] env`, optional | API base URL. Resolution: `--api`, this var, `HINDSIGHT_API_URL`, selected CLI profile/config, then refusal. No default server; see connection settings above |
+| `GC_CITY_PATH` | Gas City command/session environment | Absolute city path selecting the shared city Beads SQL store for document receipts and bank health; no rig-cwd or local journal fallback |
 | `HINDSIGHT_DOCS_ROOTS` | `[workspace] env`, optional | Whitespace-separated docs roots added to the ship sync's auto-resolution — the channel for standalone docs repos that are not rigs. Managed sessions inherit it, so the scheduled order covers them |
 | `HINDSIGHT_MEMORY` | per-agent `env` / patch | Set non-empty to render `hindsight-brief`. THE opt-in switch |
 | `HINDSIGHT_PROPOSE` | per-agent `env` / patch | Set non-empty to render `hindsight-propose` |
@@ -321,7 +385,7 @@ The bank has two write paths, one per kind of truth:
 |---|---|---|
 | Source of truth | git trees (canonical refs) | the bank itself |
 | Write path | `ship-docs.sh` sync | `memory-retain.sh` via arbitration |
-| Git involved | yes — commit is publish | no — like voice memos |
+| Git involved | yes, push to the canonical branch publishes | no, like bank-native voice memos |
 | GONE detection | yes (`document_metadata.repo`) | exempt (`kind: agent-memory`, no repo metadata key) |
 
 Repeat reports `--bump` the memory: `hit_count` increments (metadata
@@ -346,8 +410,8 @@ direction) is legitimate. The procedure differs by kind:
   `hindsight document delete <bank> <doc-id>` — clean and final. No
   file exists, nothing resurrects it.
 - **Tree-backed doc**: two halves, or it comes back.
-  1. Delete the file and commit the removal (else the next sync
-     re-ships it — the bank converges on the tree).
+  1. Delete the file, commit and push the removal to the canonical branch
+     (else the next sync re-ships it from the fetched tree).
   2. `hindsight document delete <bank> <doc-id>` (else the bank doc
      lingers and the GONE report flags it every run).
 
@@ -480,8 +544,9 @@ content requires reprocessing each document — which works only while
 `store_document_text` stays at its default `true`. That is the one irreversible
 setting here, which is why it is deliberately absent from the manifest.
 
-The saving grace: every document lives in git with a stable `document_id`, so
-any extraction mistake is recoverable by re-retaining from source. That is a
-rebuild script, not data loss — and it is a luxury a session-sourced bank does
-not have. (Bank-native agent memories are the exception: back them up with
-the bank's export tooling before any teardown.)
+Git-backed documents retain their stable `document_id`, so source remains
+available for a reviewed re-ingestion or `--reprocess` request. Re-retaining
+alone is not a guarantee that a server re-extracts unchanged chunks. Follow the
+reprocess recovery procedure above if an acknowledgement is lost. Bank-native
+agent memories are the exception to Git recovery: back them up with the bank's
+export tooling before any teardown.

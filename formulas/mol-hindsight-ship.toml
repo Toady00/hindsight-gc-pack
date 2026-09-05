@@ -1,20 +1,32 @@
 description = """
 Reconcile the platform's docs trees into the Hindsight memory bank.
 
-Runs the pack's ship command: reads the committed content of every docs
-root's canonical ref (origin/HEAD, falling back to local HEAD — never the
-working tree, so branch switches and dirty checkouts cannot leak
-unpublished content), validates frontmatter against the retain contract,
-and ships every published doc whose content differs from the bank's copy.
-The shipper is stateless — the bank is the ledger (each retain stamps a
-content hash the differ reads back), so any machine computes the same
-diff with nothing local to sync or lose. It drains in-flight bank
-operations before shipping and polls its own operations to terminal. Over-shipping is harmless (document_id retains are idempotent);
-missed shipping is the silent failure this formula exists to prevent.
-Correctness lives in the script; this formula is a dumb trigger — one of
-several. Humans and other formulas can run the same path at any time via
-the pack's `ship` command (which also owns dry-run for manual previews;
-this workflow always ships for real).
+Runs gc hindsight ship against freshly fetched origin branches. The remote's
+advertised HEAD selects the default; --ref selects a published branch. There is
+no local HEAD, SHA or filesystem fallback. Only pushed content ships, including
+drafts; branch switches and dirty checkouts are irrelevant. Every root must
+belong to Git, including worktrees. Any fetch, tree-listing or blob-read failure
+stops the entire scan before new retains.
+
+The shared city Beads SQL store is the ledger, addressed explicitly through
+GC_CITY_PATH. Durable hindsight-document and hindsight-bank records stay status
+pinned, unassigned and unrouted. metadata.hindsight uses schema_version 1 and
+api/bank/kind/document_id identity; its data holds document attempt/last_success/
+source or bank latest_run/latest_full_scan/last_success. No local health journal
+or shared lock exists. Keep one active archivist writer per bank.
+
+The shipper drains bank operations, recovers original unresolved attempts with
+bounded retry, and persists a UUID intent and payload before each retain POST.
+Only confirmed completion records success. Payload snapshots leave current
+metadata on success but remain in Dolt history. A bank hash alone cannot justify
+skipping. Missing/unknown receipts need a reviewed dry-run followed by a real
+scan to re-ingest once, not bootstrap from bank hashes. The server must advertise
+RetainRequest operation_id and async in /openapi.json; the local v0.9.1/v0.9.2
+servers used for the templates support this contract.
+
+Correctness lives in the script. Humans and other formulas use the same
+gc hindsight ship command, which queues work outside the archivist and owns
+local --dry-run previews. This workflow runs real shipping requests.
 """
 formula = "mol-hindsight-ship"
 version = "0.1.0"
@@ -22,8 +34,12 @@ phase = "vapor"
 
 [vars]
 
+[vars.request]
+description = "Base64 JSON argv from the ship command. Empty means the scheduled scan."
+default = ""
+
 [vars.docs_roots]
-description = "Space-separated docs roots. Empty means auto: every rig's docs/ directory plus the city's own docs/ if present."
+description = "Space-separated Git docs roots. Empty means auto: every rig's docs/ even if absent from checkout, city docs/ if present, and HINDSIGHT_DOCS_ROOTS."
 default = ""
 
 [[steps]]
@@ -32,23 +48,36 @@ title = "Run the ship sync"
 description = """
 Run the pack's ship command:
 
-    {{.ConfigDir}}/commands/ship/run.sh --fetch {{docs_roots}}
+    gc hindsight ship --request '{{request}}' --fetch {{docs_roots}}
 
-The bank comes from $HINDSIGHT_BANK (workspace env — every city
-declares its own); the command fails loudly if it is unset.
+The bank comes from $HINDSIGHT_BANK unless the encoded request selects --bank;
+there is no default bank. Run in the foreground, one writer command at a time.
 
-(--fetch keeps each repo's origin/HEAD current before shipping, so a
-quiet docs repo cannot ship stale-by-one-push content; a fetch failure
-warns and ships as-fetched rather than blocking.)
+--fetch is accepted for existing callers but is now a no-op: every scan fetches
+origin. A failed fetch blocks shipping, never uses stale content. --ref accepts
+foo, origin/foo, refs/heads/foo or refs/remotes/origin/foo as published branches,
+not local HEAD, commit SHAs or tags.
 
-With no roots it auto-resolves them (each rig's docs/ from `gc rig list`,
-plus the city's own docs/) and prints the resolved list — keep that in the
-bead notes so the run is auditable. The script refuses malformed docs
+With no roots it includes each registered rig's docs/, even if absent from the
+checkout, city docs/ if present, and HINDSIGHT_DOCS_ROOTS. All roots must belong
+to Git; missing rig repositories fail, while docs absent from a fetched tree
+are a valid empty inventory for GONE. Keep the resolved roots and commit SHAs
+in the bead notes. Git source records contain stable repository identity,
+relative path, branch and SHA. The script refuses malformed docs
 loudly (unknown type/status/source/scope, missing required fields) and
-prints a per-doc report: SHIPPED, skipped (unchanged), REFUSED, FAILED,
-plus GONE (in the bank but missing from the walk — deprecate-in-place was
-violated somewhere). Do not edit docs to force them through — a refusal
-is a finding, not an obstacle.
+prints per-doc SHIPPED, UNCHANGED, RECOVERED, REFUSED, FAILED and GONE findings.
+GONE means missing from the fetched repository/path prefix, never permission
+to delete bank content. Do not edit docs to force them through; a refusal is
+a finding. Pushed drafts are visible; no accepted-source filters are added.
+
+For --reprocess, retain completes before the server document reprocess call.
+That endpoint is not caller-idempotent. A lost acknowledgement leaves phase
+reprocess_prepared and fails closed. Never blindly retry the POST or clear the
+attempt. A human must inspect the operation list and repair
+metadata.hindsight.data.attempt.reprocess_operation_id with the actual UUID and
+metadata.hindsight.data.attempt.phase to reprocess_wait, preserving other state,
+before an ordinary scan resumes recovery. This requests reprocessing, not a
+verified guarantee of unchanged-chunk invalidation inside the server.
 """
 
 [[steps]]
@@ -61,6 +90,13 @@ failed, and the specific doc ids for anything refused or failed. If any doc
 FAILED extraction (operation status 'failed'), read the operation's
 error_message, and mail the mayor with doc id + error. If docs were REFUSED
 for frontmatter problems, mail the rig that owns them (or the mayor if
-ownership is unclear) with the exact validation error. A clean run needs no
-mail — close quietly.
+ownership is unclear) with the exact validation error. Record the shared bank
+health bead ID printed by the shipper and whether this was a full or partial
+scan. gc hindsight status reads shared Beads, not the live bank, and reports
+freshness and unresolved attempts. Partial scans cannot refresh the full-scan
+success timestamp; incomplete partial runs still make health unhealthy.
+Escalate incomplete roots, failed fetches, GONE findings, and any stale full-scan
+health alongside refusals and failures. Exit 5 means the run could not establish
+complete state, including operation-list or inventory failures. A clean run
+needs no mail; close quietly.
 """

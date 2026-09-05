@@ -8,13 +8,14 @@ description: Getting documents into the platform memory bank — frontmatter con
 The bank converges on the docs tree: **anything with valid frontmatter
 ships, drafts included**. You get content into the bank by writing a doc
 and committing it — not by calling the Hindsight API. The archivist's
-scheduled sync (`ship-docs.sh`) is the single ship path.
+scheduled sync (`gc hindsight ship`) is the single ship path. The supported
+v1 import binding is `hindsight`, regardless of the consuming agent's pack.
 
 The enforcement point is the schema itself (`schemas/docs/derive` —
 what it refuses is the contract). This skill is the working reference
 for authoring agents under the **docs schema**, the pack's default
 dialect; a city shipping a different dialect swaps it via
-`ship --schema` and brings its own version of this skill.
+`gc hindsight ship --schema` and brings its own version of this skill.
 
 ## Frontmatter every shippable doc needs
 
@@ -30,15 +31,18 @@ scope: platform                     # business | platform | repo
 repos: [svc-widgets]                # rig names; omit if none
 domains: [eventing]                 # bounded contexts; omit if none
 created_at: 2026-08-20T00:00:00Z
-updated_at: 2026-08-20T15:30:00Z    # bump on every revision; drives re-ship
+updated_at: 2026-08-20T15:30:00Z    # revision timestamp; the full-file hash drives re-ship
 ---
 ```
 
 Types: `adr` `spec` `hld` `prd` `user-journey` `methodology` `convention`
 `current-state` `meeting-notes` `discussion` `voice-memo` `build-report`
 `runbook` `gotcha` `external`. Anything else is refused at ship time.
-Omit `status` entirely for current-state, build-report, gotcha,
-voice-memo, external.
+Every type requires `status`, including current-state, build-report, gotcha,
+voice-memo, and external. Status never selects extraction strategy; `type` does.
+Acceptance admits a record without changing its kind of evidence: a survey
+remains an observation and a voice memo remains thinking. Missing status is
+refused. Legacy bank-native memories need an explicit `--status` on first bump.
 
 Rules that bite:
 
@@ -66,7 +70,7 @@ verdict must look like in frontmatter:
 
 - A human approving a revision sets `status: accepted` **and**
   `source: human` together, bumps `updated_at`, commits, and ships (the
-  `ship` command, or let the hourly sync catch it).
+  `gc hindsight ship` command, or let the hourly sync catch it).
 - Only record an approval a human actually gave, with traceable
   provenance. Never infer one.
 - Revising a human-approved doc reverts `source:` to `agent` (and
@@ -95,13 +99,13 @@ list in the contract is absolute.
 Agent memories are **bank-native** — no file, no commit, no git. Like
 voice memos, they live only in the bank; the docs corpus ships from
 git, agent memories ship from arbitration. The single write path is
-`assets/scripts/memory-retain.sh`, which builds the contract payload,
-refuses to race a pending operation for the same `document_id` (racing
+`gc hindsight retain`, backed by `memory-retain.sh`. The helper builds the
+contract payload, refuses to race a pending operation for the same `document_id` (racing
 orphans memories permanently), and polls to terminal:
 
 ```bash
 # Accept a new memory (content on stdin, Symptom/Cause/Fix/Applies-to):
-memory-retain.sh --id gotcha.tflint-provider-cache-lock \
+gc hindsight retain --id gotcha.tflint-provider-cache-lock \
   --title "tflint provider cache lock" \
   --repos terraform-platform --scope repo << 'EOF'
 ## Symptom
@@ -115,10 +119,10 @@ memory-retain.sh --id gotcha.tflint-provider-cache-lock \
 EOF
 
 # Repeat report, nothing new: bump count + refresh timestamp
-memory-retain.sh --bump --id gotcha.tflint-provider-cache-lock
+gc hindsight retain --bump --id gotcha.tflint-provider-cache-lock
 
 # Repeat report with new information: merge, then bump with the merged content
-memory-retain.sh --bump --id gotcha.tflint-provider-cache-lock --content-file merged.md
+gc hindsight retain --bump --id gotcha.tflint-provider-cache-lock --content-file merged.md
 ```
 
 Usually `type: gotcha`; pick the type that fits — the type table is the
@@ -140,12 +144,12 @@ out of recency naturally.
 ```bash
 TMP=$(mktemp -d)
 # semantic match against the bank, scoped to the reported rig
-hindsight -o json memory recall "$HINDSIGHT_BANK" "<symptom>" \
+gc hindsight read -o json memory recall "$HINDSIGHT_BANK" "<symptom>" \
   --tags repo:<rig>,scope:platform --tags-match any_strict \
   --budget low --max-tokens 1024 > "$TMP/dedup.json" 2>/dev/null
 jq -r '.results[]?.text' "$TMP/dedup.json"
 # existing agent memories, with their ids and hit counts (paged: .items)
-hindsight -o json document list "$HINDSIGHT_BANK" > "$TMP/docs.json" 2>/dev/null
+gc hindsight read -o json document list "$HINDSIGHT_BANK" > "$TMP/docs.json" 2>/dev/null
 jq -r '.items[] | select(.document_metadata.kind == "agent-memory")
   | "\(.id)\thits=\(.document_metadata.hit_count // 1)"' "$TMP/docs.json"
 ```
@@ -154,16 +158,17 @@ A rising `hit_count` on an existing memory means the memory is not
 landing — a system-deficiency signal (injection or retrieval is
 failing those agents), surfaced by the same documents-list query.
 
-## If you must call the ship script yourself
+## Requesting an immediate ship
 
 Formula final steps may run the sync for immediacy:
 
 ```bash
-<pack>/assets/scripts/ship-docs.sh <docs-root>   # bank from $HINDSIGHT_BANK
+gc hindsight ship <docs-root>   # queues work to the archivist
 ```
 
-It validates, skips unchanged docs, serializes per document (never races a
-pending operation — racing orphans memories permanently), and polls
-operations to terminal. Exit non-zero means refused or failed docs; read
-the report, fix the doc, never work around the validator. Direct API
-retains outside this script are forbidden.
+Outside the managed archivist, this queues a formula and returns after dispatch.
+The formula bead carries the eventual result. Within the archivist it validates,
+skips unchanged docs, drains prior operations and polls new ones to terminal.
+Only the archivist may invoke write scripts directly, and it must run them one
+at a time in the foreground. `--dry-run` previews locally. `--reprocess` queues
+re-extraction even when content hashes match. Direct API retains are forbidden.

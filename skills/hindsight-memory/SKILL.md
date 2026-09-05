@@ -7,7 +7,8 @@ description: Reading the platform memory bank — reflect at task start, recall 
 
 The bank id comes from your environment (`$HINDSIGHT_BANK`, set once at
 the workspace level). This skill is the working subset of the read-side
-patterns.
+patterns. The supported v1 import binding is `hindsight`; use
+`gc hindsight read` even when your agent belongs to another pack.
 
 ```bash
 BANK="${HINDSIGHT_BANK:?HINDSIGHT_BANK not set — declare it in [workspace] env}"
@@ -29,12 +30,12 @@ BANK="${HINDSIGHT_BANK:?HINDSIGHT_BANK not set — declare it in [workspace] env
 
 ```bash
 # Task start — your rig name IS your repo tag
-hindsight memory reflect $BANK "<the task, verbatim>" \
+gc hindsight read memory reflect "$BANK" "<the task, verbatim>" \
   --tags repo:<your-rig>,scope:platform --tags-match any_strict --budget mid
 
 # Lookup — redirect, then extract; never dump raw output into context
 TMP=$(mktemp -d)
-hindsight -o json memory recall $BANK "<question>" \
+gc hindsight read -o json memory recall "$BANK" "<question>" \
   --tags repo:<your-rig>,scope:platform --tags-match any_strict \
   --budget low --max-tokens 2048 > "$TMP/r.json" 2>/dev/null
 jq -r '.results[]? | .text' "$TMP/r.json"
@@ -44,7 +45,7 @@ jq -r '.results[]? | .text' "$TMP/r.json"
 `conventions-and-standards` and `landmines`:
 
 ```bash
-hindsight -o json mental-model get $BANK conventions-and-standards > "$TMP/m.json" 2>/dev/null
+gc hindsight read -o json mental-model get "$BANK" conventions-and-standards > "$TMP/m.json" 2>/dev/null
 jq -r '.content' "$TMP/m.json"   # take .content, never the whole object
 ```
 
@@ -64,7 +65,15 @@ The bank deliberately contains work in flight. Read the tags:
 | `status:accepted` + `source:human` | ratified by a person |
 | `status:accepted` + `source:agent` | standing position from a trusted workflow, never human-reviewed |
 | `status:superseded` / `deprecated` | history, kept queryable on purpose |
-| no `status:` | voice memos, gotchas, surveys, build reports — status does not apply |
+| no `status:` | legacy or malformed record; do not infer acceptance |
+
+Every document now requires status, including surveys, voice memos, build
+reports, and gotchas. Acceptance admits the record; its type still determines
+what it establishes. An accepted survey is an observation, and an accepted
+voice memo is thinking, never a platform decision.
+
+The read command resolves the same endpoint and credential as shipping,
+including the legacy `HINDSIGHT_API` alias.
 
 Treat drafts as "which way things are leaning" — useful for tangential
 work, never citable as platform fact.
@@ -82,7 +91,7 @@ that makes platform-wide docs visible from inside a rig. Never use plain
 | One domain, anywhere | `--tags domain:<d> --tags-match any_strict` |
 | Everything | omit `--tags` |
 
-## Hard ground truth: `tag_groups` (API-only)
+## Compound filtering: `tag_groups` (API-only)
 
 "(my rig OR platform) AND accepted" cannot be expressed as a flat list —
 adding `status:accepted` to an OR list *broadens* it. Use the API:
@@ -100,9 +109,10 @@ curl -sS -X POST "$HINDSIGHT_API/v1/default/banks/$BANK/memories/recall" \
 
 Verified caveats:
 
-- Requiring `status:accepted` is airtight but returns **raw memories
+- Requiring `status:accepted` selects explicitly accepted records and returns **raw memories
   only** — observations (the consolidated layer) carry only their
-  observation-scope tag, never status/source/memory_type.
+  observation-scope tag, never status/source/memory_type. Acceptance alone
+  does not make an observation or voice memo a decision; read its type.
 - A `{"not": ...}` on status is a **soft filter**: status-less
   observations and memories pass through. Never use NOT for
   compliance-grade exclusion; use the positive form.

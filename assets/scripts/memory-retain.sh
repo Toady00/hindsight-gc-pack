@@ -3,7 +3,8 @@
 #
 # BANK-NATIVE, NO FILES. The docs corpus ships from git via ship-docs.sh;
 # agent memories (gotchas and future agent-memory types) live only in the
-# bank, like voice memos. This script is the ONLY way they get written:
+# bank, like voice memos, with durable ingestion receipts in city Beads.
+# This script is the ONLY way they get written:
 # it builds the contract-compliant payload, refuses to race a pending
 # operation for the same document_id (re-retaining while one is pending
 # orphans memories PERMANENTLY — verified 2026-08-25), and polls its own
@@ -19,6 +20,7 @@
 #   --repos <a,b>          rig names this memory bites (repo: tags — retrieval)
 #   --domains <a,b>        bounded contexts, if any
 #   --scope <s>            business|platform|repo (default: repo)
+#   --status <s>           draft|accepted|superseded|deprecated (new arbitrated memories default accepted)
 #   --source <s>           human|agent|external (default: agent)
 #   --bump                 repeat report: fetch the existing doc, increment
 #                          hit_count, refresh the report line and timestamp,
@@ -36,16 +38,10 @@
 # repo: retrieval TAGS are unaffected and required for rig discovery.
 set -euo pipefail
 
-# API resolution: --api → $HINDSIGHT_API → the hindsight CLI's own config
-# (~/.hindsight/config api_url) → loud refusal. No hardcoded server.
-api_from_cli_config() {
-  local cfg="${HINDSIGHT_CONFIG:-$HOME/.hindsight/config}"
-  [[ -f "$cfg" ]] || return 0
-  sed -n 's/^[[:space:]]*api_url[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$cfg" | head -1
-}
-
-API="${HINDSIGHT_API:-}"
-BANK="" ID="" TYPE="gotcha" TITLE="" REPOS="" DOMAINS="" SCOPE="repo" SOURCE="agent"
+PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$PACK_DIR/assets/scripts/common.sh"
+API=""
+BANK="" ID="" TYPE="" TITLE="" REPOS="" DOMAINS="" SCOPE="" SOURCE="" STATUS=""
 BUMP=false CONTENT_FILE="" DRY_RUN=false DRAIN_TIMEOUT=300
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +53,7 @@ while [[ $# -gt 0 ]]; do
     --domains) DOMAINS="$2"; shift 2 ;;
     --scope) SCOPE="$2"; shift 2 ;;
     --source) SOURCE="$2"; shift 2 ;;
+    --status) STATUS="$2"; shift 2 ;;
     --bump) BUMP=true; shift ;;
     --content-file) CONTENT_FILE="$2"; shift 2 ;;
     --bank) BANK="$2"; shift 2 ;;
@@ -68,27 +65,22 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$BANK" ]] || BANK="${HINDSIGHT_BANK:-}"
 [[ -n "$BANK" ]] || { echo "no bank: set HINDSIGHT_BANK in [workspace] env, or pass --bank <id>" >&2; exit 2; }
-[[ -n "$API" ]] || API="$(api_from_cli_config)"
-[[ -n "$API" ]] || { echo "no API: set HINDSIGHT_API, configure api_url in ~/.hindsight/config, or pass --api <url>" >&2; exit 2; }
+hs_connect
+$DRY_RUN || hs_require_writer
 [[ -n "$ID" ]] || { echo "--id is required" >&2; exit 2; }
-
-# Same type table as ship-docs.sh — one contract, two write paths.
-strategy_for() {
-  case "$1" in
-    adr|spec|hld) echo design-record ;;
-    prd|user-journey) echo product-doc ;;
-    methodology) echo methodology ;;
-    convention) echo convention ;;
-    current-state) echo current-state ;;
-    meeting-notes|discussion) echo discussion ;;
-    voice-memo) echo voice-memo ;;
-    build-report) echo build-report ;;
-    runbook) echo operational-runbook ;;
-    gotcha) echo gotcha ;;
-    external) echo source-document ;;
-    *) return 1 ;;
+[[ "$DRAIN_TIMEOUT" =~ ^[0-9]+$ ]] || { echo "invalid drain timeout" >&2; exit 2; }
+# Drain before reading the prior document for a bump, not just before POST.
+$DRY_RUN || hs_drain || exit $?
+if ! $DRY_RUN; then
+  recovery="$(python3 "$PACK_DIR/assets/scripts/ingestion_cli.py" recover "$BANK" "$ID")" || exit $?
+  case "$recovery" in
+    recovered)
+      echo "RECOVERED $ID: prior attempt completed; no additional hit counted; run again for a separate report"
+      exit 0 ;;
+    idle) ;;
+    *) echo "invalid ingestion recovery response; nothing new will be written" >&2; exit 5 ;;
   esac
-}
+fi
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -100,6 +92,7 @@ if $BUMP; then
   hindsight -o json document get "$BANK" "$ID" > "$TMP/doc.json" 2>/dev/null \
     || { echo "bump: cannot fetch document '$ID' from bank '$BANK'" >&2; exit 3; }
   prev_count="$(jq -r '.document_metadata.hit_count // .metadata.hit_count // 1' "$TMP/doc.json")"
+  [[ "$prev_count" =~ ^[0-9]+$ ]] || { echo "invalid stored hit_count" >&2; exit 3; }
   HIT_COUNT=$((prev_count + 1))
   if [[ -n "$CONTENT_FILE" ]]; then
     CONTENT="$(cat "$CONTENT_FILE")"
@@ -114,27 +107,16 @@ if $BUMP; then
   tags_json="$(jq -c '.tags // []' "$TMP/doc.json")"
   [[ -n "$REPOS" ]]   || REPOS="$(jq -r '[.[] | select(startswith("repo:")) | sub("^repo:";"")] | join(",")' <<<"$tags_json")"
   [[ -n "$DOMAINS" ]] || DOMAINS="$(jq -r '[.[] | select(startswith("domain:")) | sub("^domain:";"")] | join(",")' <<<"$tags_json")"
-  SCOPE="$(jq -r '[.[] | select(startswith("scope:")) | sub("^scope:";"")] | first // "'"$SCOPE"'"' <<<"$tags_json")"
-  SOURCE="$(jq -r '[.[] | select(startswith("source:")) | sub("^source:";"")] | first // "'"$SOURCE"'"' <<<"$tags_json")"
-  TYPE="$(jq -r '[.[] | select(startswith("memory_type:")) | sub("^memory_type:";"")] | first // "'"$TYPE"'"' <<<"$tags_json")"
+  [[ -n "$SCOPE" ]] || SCOPE="$(jq -r '[.[] | select(startswith("scope:")) | sub("^scope:";"")] | first // "'"$SCOPE"'"' <<<"$tags_json")"
+  [[ -n "$SOURCE" ]] || SOURCE="$(jq -r '[.[] | select(startswith("source:")) | sub("^source:";"")] | first // "'"$SOURCE"'"' <<<"$tags_json")"
+  [[ -n "$TYPE" ]] || TYPE="$(jq -r '[.[] | select(startswith("memory_type:")) | sub("^memory_type:";"")] | first // "'"$TYPE"'"' <<<"$tags_json")"
+  [[ -n "$STATUS" ]] || STATUS="$(jq -r '[.[] | select(startswith("status:")) | sub("^status:";"")] | first // ""' <<<"$tags_json")"
+  [[ -n "$STATUS" ]] || { echo "legacy memory has no status; choose --status explicitly" >&2; exit 2; }
 else
+  TYPE="${TYPE:-gotcha}"; SCOPE="${SCOPE:-repo}"; SOURCE="${SOURCE:-agent}"; STATUS="${STATUS:-accepted}"
   [[ -n "$TITLE" ]] || { echo "--title is required for new retains" >&2; exit 2; }
   if [[ -n "$CONTENT_FILE" ]]; then CONTENT="$(cat "$CONTENT_FILE")"; else CONTENT="$(cat)"; fi
   [[ -n "$CONTENT" ]] || { echo "no content (stdin or --content-file)" >&2; exit 2; }
-fi
-
-# ---------- validation: same vocabulary the shipper enforces ----------
-STRATEGY="$(strategy_for "$TYPE")" || { echo "unknown type '$TYPE'" >&2; exit 2; }
-case "$SCOPE" in business|platform|repo) ;; *) echo "bad scope '$SCOPE'" >&2; exit 2 ;; esac
-case "$SOURCE" in human|agent|external) ;; *) echo "bad source '$SOURCE'" >&2; exit 2 ;; esac
-if command -v gc >/dev/null 2>&1 && [[ -n "$REPOS" ]]; then
-  KNOWN="$(gc rig list --json 2>/dev/null | jq -r '.rigs[]?.name // empty' 2>/dev/null | sort -u || true)"
-  if [[ -n "$KNOWN" ]]; then
-    while IFS= read -r r; do
-      [[ -z "$r" ]] && continue
-      grep -qx "$r" <<<"$KNOWN" || echo "WARN: repo '$r' matches no rig in this city" >&2
-    done < <(tr ',' '\n' <<<"$REPOS")
-  fi
 fi
 
 # ---------- report line: owned by this script, reader-visible ----------
@@ -146,17 +128,14 @@ CONTENT="$(printf '%s\n\nReported %s %s (last: %s).\n' "$(printf '%s' "$CONTENT"
 # ---------- contract payload ----------
 repos_json="$(jq -cRn --arg s "$REPOS" '$s | split(",") | map(select(length>0))')"
 domains_json="$(jq -cRn --arg s "$DOMAINS" '$s | split(",") | map(select(length>0))')"
-context="$TYPE: $TITLE"
-dj="$(jq -r 'join(", ")' <<<"$domains_json")"; [[ -n "$dj" ]] && context+=" — domain $dj"
-rj="$(jq -r 'join(", ")' <<<"$repos_json")";   [[ -n "$rj" ]] && context+=", repo $rj"
-context+="; agent-learned, arbitrated by the archivist"
-
-tags="$(jq -cn --arg scope "$SCOPE" --arg type "$TYPE" --arg source "$SOURCE" \
-  --argjson repos "$repos_json" --argjson domains "$domains_json" '
-  ["scope:\($scope)"] + ($repos | map("repo:\(.)")) + ($domains | map("domain:\(.)"))
-  + ["memory_type:\($type)", "source:\($source)"]')"
-oscopes="$(jq -cn --arg scope "$SCOPE" --argjson repos "$repos_json" --argjson domains "$domains_json" '
-  ($domains | map(["domain:\(.)"])) + ($repos | map(["repo:\(.)"])) + [["scope:\($scope)"]]')"
+verdict="$(jq -cn --arg id "$ID" --arg title "$TITLE" --arg type "$TYPE" --arg scope "$SCOPE" --arg source "$SOURCE" --arg status "$STATUS" --arg updated_at "$NOW" --argjson repos "$repos_json" --argjson domains "$domains_json" \
+  '{id:$id,title:$title,type:$type,scope:$scope,source:$source,status:$status,updated_at:$updated_at,repos:$repos,domains:$domains}' \
+  | python3 "$PACK_DIR/schemas/docs/validate.py")"
+[[ "$(jq -r .verdict <<<"$verdict")" == "ship" ]] || { jq -r '.reason // "invalid memory"' <<<"$verdict" >&2; exit 2; }
+STRATEGY="$(jq -r .strategy <<<"$verdict")"
+context="$(jq -r .context <<<"$verdict"); agent-learned, arbitrated by the archivist"
+tags="$(jq -c .tags <<<"$verdict")"
+oscopes="$(jq -c .observation_scopes <<<"$verdict")"
 # metadata values must be strings (API rejects numbers) — hit_count rides
 # as a string and is parsed back to int on --bump. title is stored so a
 # bump can rebuild the context line without parsing it back apart.
@@ -174,32 +153,5 @@ if $DRY_RUN; then
   exit 0
 fi
 
-# ---------- serialization: never race a pending operation ----------
-deadline=$(( $(date +%s) + DRAIN_TIMEOUT ))
-while :; do
-  pending="$(hindsight -o json operation list "$BANK" 2>/dev/null \
-    | jq '[.[] | select(.status == "pending" or .status == "processing")] | length' 2>/dev/null || echo 0)"
-  [[ "$pending" -eq 0 ]] && break
-  if [[ $(date +%s) -ge $deadline ]]; then
-    echo "drain timeout: $pending operation(s) still in flight; NOT retaining $ID (racing a pending op orphans memories)" >&2
-    exit 3
-  fi
-  sleep 5
-done
-
-resp="$(curl -sS -X POST "$API/v1/default/banks/$BANK/memories" \
-  -H 'Content-Type: application/json' -d "$payload")"
-op_id="$(jq -r '.operation_id // empty' <<<"$resp")"
-[[ -n "$op_id" ]] || { echo "FAILED $ID: retain rejected: $resp" >&2; exit 1; }
-
-for i in $(seq 1 90); do
-  st="$(hindsight -o json operation get "$BANK" "$op_id" 2>/dev/null | jq -r '.status // "unknown"')"
-  case "$st" in
-    pending|processing) sleep 10 ;;
-    completed) echo "RETAINED $ID op=$op_id hit_count=$HIT_COUNT"; exit 0 ;;
-    *) err="$(hindsight -o json operation get "$BANK" "$op_id" 2>/dev/null | jq -r '.error_message // "n/a"')"
-       echo "FAILED $ID: op $op_id ended '$st': $err" >&2; exit 1 ;;
-  esac
-done
-echo "FAILED $ID: op $op_id did not reach terminal status" >&2
-exit 1
+result="$(python3 "$PACK_DIR/assets/scripts/ingestion_cli.py" retain "$BANK" <<<"$payload")" || exit $?
+echo "$result hit_count=$HIT_COUNT"

@@ -44,15 +44,9 @@
 
 set -euo pipefail
 
-# API resolution: --api → $HINDSIGHT_API → the hindsight CLI's own config
-# (~/.hindsight/config api_url) → loud refusal. No hardcoded server.
-api_from_cli_config() {
-  local cfg="${HINDSIGHT_CONFIG:-$HOME/.hindsight/config}"
-  [[ -f "$cfg" ]] || return 0
-  sed -n 's/^[[:space:]]*api_url[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$cfg" | head -1
-}
-
-API="${HINDSIGHT_API:-}"
+PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$PACK_DIR/assets/scripts/common.sh"
+API=""
 BANK=""
 DOMAINS_FILE=""
 SCHEMA_DIR=""
@@ -72,30 +66,22 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$BANK" ]] || BANK="${HINDSIGHT_BANK:-}"
 [[ -n "$BANK" ]] || { echo "no bank: set HINDSIGHT_BANK in [workspace] env, or pass --bank <id>" >&2; exit 64; }
-[[ -n "$API" ]] || API="$(api_from_cli_config)"
-[[ -n "$API" ]] || { echo "no API: set HINDSIGHT_API, configure api_url in ~/.hindsight/config, or pass --api <url>" >&2; exit 64; }
+hs_connect
+$SKIP_CONSOLIDATE || hs_require_writer
+[[ "$DRAIN_TIMEOUT" =~ ^[0-9]+$ ]] || { echo "invalid drain timeout" >&2; exit 64; }
 
 PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ -n "$SCHEMA_DIR" ]] || SCHEMA_DIR="${HINDSIGHT_SCHEMA:-$PACK_DIR/schemas/docs}"
 VOCAB="$SCHEMA_DIR/audit-vocab.json"
 [[ -f "$VOCAB" ]] || VOCAB=""
 
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 TAGFILE="${TMPDIR:-/tmp}/hindsight-tag-audit.$BANK.json"
 
 # ---------- 1. drain ----------
 echo "== drain =="
-deadline=$((SECONDS + DRAIN_TIMEOUT))
-while :; do
-  hindsight -o json operation list "$BANK" > "$TMP/ops.json" 2>/dev/null || echo '[]' > "$TMP/ops.json"
-  inflight="$(jq -r '[.. | objects | select(has("status")) | .status | select(. == "pending" or . == "processing")] | length' "$TMP/ops.json")"
-  [[ "$inflight" -eq 0 ]] && { echo "drained: no operations in flight"; break; }
-  if (( SECONDS >= deadline )); then
-    echo "DRAIN TIMEOUT: $inflight operation(s) still in flight after ${DRAIN_TIMEOUT}s — not consolidating over a moving corpus" >&2
-    exit 3
-  fi
-  echo "  waiting: $inflight in flight"; sleep 10
-done
+hs_drain || exit $?
+echo "drained: no operations in flight"
 
 # ---------- 2. consolidate ----------
 if ! $SKIP_CONSOLIDATE; then
@@ -115,7 +101,7 @@ fi
 # crashed load's trap never fires. This catches the drift within a day.
 echo "== config drift =="
 hindsight -o json bank config "$BANK" > "$TMP/cfg.json" 2>/dev/null || echo '{}' > "$TMP/cfg.json"
-AUTOC="$(jq -r '.config.enable_auto_consolidation // "unknown"' "$TMP/cfg.json")"
+AUTOC="$(jq -r 'if .config | has("enable_auto_consolidation") then .config.enable_auto_consolidation else "unknown" end' "$TMP/cfg.json")"
 if [[ "$AUTOC" != "true" ]]; then
   echo "CONFIG-DRIFT  enable_auto_consolidation=$AUTOC (expected true — a bulk load may have died before re-enabling it)" >> "$TMP/findings.txt.pre"
   echo "config drift: enable_auto_consolidation=$AUTOC"
@@ -125,8 +111,24 @@ fi
 
 # ---------- 4. tag audit ----------
 echo "== tag audit =="
-hindsight -o json tag list "$BANK" --limit 500 > "$TAGFILE" 2>/dev/null
-jq -r '.items[]?.tag // empty' "$TAGFILE" | sort -u > "$TMP/tags.txt"
+echo '[]' > "$TMP/tag-items.json"
+offset=0
+while :; do
+  hindsight -o json tag list "$BANK" --limit 500 --offset "$offset" > "$TMP/tags-page.json" || exit 5
+  jq -e '.items | type == "array" and all(.[]; .tag | type == "string")' "$TMP/tags-page.json" >/dev/null || exit 5
+  count="$(jq '.items | length' "$TMP/tags-page.json")"
+  jq -s '.[0] + .[1].items' "$TMP/tag-items.json" "$TMP/tags-page.json" > "$TMP/tag-merged.json"
+  mv "$TMP/tag-merged.json" "$TMP/tag-items.json"
+  offset=$((offset + count))
+  total="$(jq -r '.total // empty' "$TMP/tags-page.json")"
+  if [[ -n "$total" ]]; then
+    [[ "$offset" -ge "$total" ]] && break
+    [[ "$count" -gt 0 ]] || { echo "incomplete tag inventory" >&2; exit 5; }
+  elif [[ "$count" -lt 500 ]]; then break
+  fi
+done
+jq '{items:., total:length}' "$TMP/tag-items.json" > "$TAGFILE"
+jq -r '.items[].tag' "$TAGFILE" | sort -u > "$TMP/tags.txt"
 : > "$TMP/findings.txt"
 [[ -f "$TMP/findings.txt.pre" ]] && cat "$TMP/findings.txt.pre" >> "$TMP/findings.txt"
 
@@ -151,18 +153,25 @@ fi
 #    schema declares the repo axis maps to the rig registry)
 if command -v gc >/dev/null 2>&1 \
   && [[ -n "$VOCAB" && "$(jq -r '.repo_axis_is_rig_registry // false' "$VOCAB")" == "true" ]]; then
-  gc rig list --json 2>/dev/null | jq -r '.[].name' 2>/dev/null | sort -u > "$TMP/rigs.txt" || true
-  if [[ -s "$TMP/rigs.txt" ]]; then
-    grep '^repo:' "$TMP/tags.txt" | sed 's/^repo://' | while IFS= read -r r; do
-      grep -qx "$r" "$TMP/rigs.txt" || echo "UNKNOWN-RIG   repo:$r"
+  registry_ok=false
+  if gc rig list --json > "$TMP/rigs.json" && jq -e '.rigs | type == "array" and all(.[]; .name | type == "string")' "$TMP/rigs.json" >/dev/null; then
+    registry_ok=true
+    jq -r '.rigs[].name' "$TMP/rigs.json" | sort -u > "$TMP/rigs.txt"
+  else
+    echo "AUDIT-INCOMPLETE rig registry unavailable" >> "$TMP/findings.txt"
+    : > "$TMP/rigs.txt"
+  fi
+  if $registry_ok; then
+    { grep '^repo:' "$TMP/tags.txt" || true; } | sed 's/^repo://' | while IFS= read -r r; do
+      grep -Fxq "$r" "$TMP/rigs.txt" || echo "UNKNOWN-RIG   repo:$r"
     done >> "$TMP/findings.txt"
   fi
 fi
 
 # d. domain values against the vocab file (when given)
 if [[ -n "$DOMAINS_FILE" && -f "$DOMAINS_FILE" ]]; then
-  grep '^domain:' "$TMP/tags.txt" | sed 's/^domain://' | while IFS= read -r d; do
-    grep -qx "$d" "$DOMAINS_FILE" || echo "NEW-DOMAIN    domain:$d"
+  { grep '^domain:' "$TMP/tags.txt" || true; } | sed 's/^domain://' | while IFS= read -r d; do
+    grep -Fxq "$d" "$DOMAINS_FILE" || echo "NEW-DOMAIN    domain:$d"
   done >> "$TMP/findings.txt"
 fi
 

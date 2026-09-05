@@ -57,7 +57,7 @@ surveys, gotchas — distilled into queryable memory.
 At task start, run ONE reflect scoped to your rig and keep the answer
 for the whole task:
 
-    hindsight memory reflect "$HINDSIGHT_BANK" "<the task, verbatim>" \
+    gc hindsight read memory reflect "$HINDSIGHT_BANK" "<the task, verbatim>" \
       --tags repo:{{.RigName}},scope:platform --tags-match any_strict --budget mid
 {{else}}
 You field many unrelated asks in one session, so there is no single
@@ -65,7 +65,7 @@ task-start ritual. Use reflect at will — once per NEW ask that touches
 the platform, scoped to what the ask touches (include `repo:<rig>` for
 every rig involved):
 
-    hindsight memory reflect "$HINDSIGHT_BANK" "<the ask, verbatim>" \
+    gc hindsight read memory reflect "$HINDSIGHT_BANK" "<the ask, verbatim>" \
       --tags repo:<rig>,scope:platform,scope:business --tags-match any_strict --budget mid
 
 Skip the ritual entirely for asks about operating the city itself
@@ -77,7 +77,7 @@ Also fetch your standing briefs before starting work — read only
 
     TMP=$(mktemp -d)
     for m in {{.HINDSIGHT_MENTAL_MODELS}}; do
-      hindsight -o json mental-model get "$HINDSIGHT_BANK" "$m" > "$TMP/$m.json" 2>/dev/null
+      gc hindsight read -o json mental-model get "$HINDSIGHT_BANK" "$m" > "$TMP/$m.json" 2>/dev/null
       jq -r '.content' "$TMP/$m.json"
     done
 {{end}}
@@ -152,7 +152,7 @@ verdict**, and unsure means deny. Work each proposal in order:
    `hindsight-shipping` skill): one low-budget `recall` scoped to the
    reported rig, plus a check of existing agent memories
    (`kind: agent-memory` in the documents list).
-   - **Fully covered** → `memory-retain.sh --bump <id>`: increments
+    - **Fully covered** → `gc hindsight retain --bump --id <id>`: increments
      `hit_count`, refreshes the report line and the bank timestamp. The
      repeat report is itself a finding: the memory existed and did not
      land, and the count records that.
@@ -176,7 +176,7 @@ verdict**, and unsure means deny. Work each proposal in order:
 5. **Routing beats retaining.** If the root cause is a doc that
    affirmatively says the wrong thing, mail the owning rig to fix the
    doc instead of accepting — the bank converges on the corrected doc.
-6. **Accept** → retain it with `memory-retain.sh` (usually
+6. **Accept** → retain it with `gc hindsight retain` (usually
    `type: gotcha`; pick the type that fits), with `repo:` tags for the
    rigs it bites. Agent memories are bank-native — no file, no commit;
    the script is the only write path and handles serialization.

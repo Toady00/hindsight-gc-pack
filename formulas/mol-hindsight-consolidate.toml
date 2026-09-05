@@ -32,7 +32,7 @@ title = "Run deterministic maintenance"
 description = """
 Run the maintenance script and capture its report in the bead notes:
 
-    {{.ConfigDir}}/assets/scripts/bank-maintain.sh
+    gc hindsight maintain
 
 The bank comes from $HINDSIGHT_BANK (workspace env); the script fails
 loudly if it is unset.
@@ -46,11 +46,13 @@ re-derive its steps by hand:
   NEAR-DUP). Malformed or misspelled tags mean a writer bypassed the
   shipper — treat as an incident: identify the writer, mail the mayor with
   the finding lines. Fixes happen at the source (correct the doc, re-ship),
-  never by editing memories. NEW-DOMAIN alone may be legitimate vocabulary
+  never by editing memories. CONFIG-DRIFT or AUDIT-INCOMPLETE requires operator attention. NEW-DOMAIN alone may be legitimate vocabulary
   growth — judge before escalating.
 - 3: drain timeout — operations still in flight; consolidation was not
   run. Note it in the bead and stop (the next nightly run will catch up);
   mail the mayor only if this is the second consecutive timeout.
+- 5: operation state or audit inventory could not be read reliably. Record
+  the failure and mail the mayor; never report this as a clean night.
 - 4: consolidation failed after recover+retry. Mail the mayor with the
   error output. Do not loop.
 """
@@ -65,7 +67,7 @@ Skip this step unless maintain exited 0 or 2 (consolidation actually ran).
 Create a scratch dir (`TMP=$(mktemp -d)`) — every API response lands under
 it, reaped on reboot, never dumped raw into your context. For each id in
 {{audit_models}}: fetch it
-(`hindsight -o json mental-model get "$HINDSIGHT_BANK" <id> > "$TMP/<id>.json"`),
+(`gc hindsight read -o json mental-model get "$HINDSIGHT_BANK" <id> > "$TMP/<id>.json"`),
 read only `.content` via jq — a mental-model response can be 100x larger
 than its readable content — and check its claims against what the corpus
 establishes. Flag claims that name decisions, dates, or reaffirmations no

@@ -2,6 +2,7 @@
 schema_version: 2
 id: voice-memo.2026-08-22-duckdb
 type: voice-memo
+status: draft
 title: Founder memo — DuckDB for analytics?
 source: human
 scope: platform

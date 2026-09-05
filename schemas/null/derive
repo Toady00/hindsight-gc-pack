@@ -13,7 +13,7 @@
 #   hindsight:
 #     id: my.doc.0001                 # required
 #     strategy: design-record        # required, a hindsight retain strategy
-#     tags: [team:eng, kind:spec]    # optional
+#     tags: [team:eng, kind:spec, status:draft] # one status is required
 #     observation_scopes: [[team:eng]]   # optional (default: combined)
 #     context: "spec: my doc"        # optional
 #     timestamp: 2026-08-30T00:00:00Z    # optional (default: now)
@@ -32,6 +32,12 @@ doc_id="$(jq -r '.id // ""' <<<"$hs")"
 strategy="$(jq -r '.strategy // ""' <<<"$hs")"
 [[ -n "$doc_id" ]] || { jq -cn '{verdict:"refuse",document_id:"?",reason:"hindsight block missing id"}'; exit 0; }
 [[ -n "$strategy" ]] || { jq -cn --arg id "$doc_id" '{verdict:"refuse",document_id:$id,reason:"hindsight block missing strategy"}'; exit 0; }
+if ! jq -e '.tags | if type != "array" then false else
+  map(select(type == "string" and startswith("status:"))) as $statuses |
+  ($statuses | length) == 1 and (["status:draft","status:accepted","status:superseded","status:deprecated"] | index($statuses[0])) != null end' <<<"$hs" >/dev/null; then
+  jq -cn --arg id "$doc_id" '{verdict:"refuse",document_id:$id,reason:"tags must contain exactly one valid status tag"}'
+  exit 0
+fi
 
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 jq -cn --arg now "$NOW" --argjson hs "$hs" '
