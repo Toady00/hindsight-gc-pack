@@ -29,7 +29,6 @@ class MemoryStore:
         self.rows = {}
         self.writes = []
         self.reject = lambda state: False
-        self.drop = False
 
     def get(self, kind, document_id=""):
         return deepcopy(self.rows.get((kind, document_id)))
@@ -38,8 +37,7 @@ class MemoryStore:
         if self.reject(data):
             raise ingestion.Error("store unavailable")
         self.writes.append(deepcopy(data))
-        if not self.drop:
-            self.rows[kind, document_id] = deepcopy(data)
+        self.rows[kind, document_id] = deepcopy(data)
         return "city-record"
 
 
@@ -230,14 +228,16 @@ class IngestorTest(unittest.TestCase):
         self.assertTrue(ingestion.Ingestor(self.store, self.api).recover("docs/a"))
         self.assertEqual(len(self.api.posts), 1)
 
-    def test_store_failure_or_unconfirmed_write_prevents_post(self):
+    def test_store_failure_prevents_post(self):
         self.store.reject = lambda state: True
         self.assert_error(5, self.retain)
         self.assertEqual(self.api.posts, [])
-        self.store.reject = lambda state: False
-        self.store.drop = True
-        self.assert_error(5, self.retain)
-        self.assertEqual(self.api.posts, [])
+
+    def test_save_uses_store_confirmation_without_another_read(self):
+        with patch.object(self.store, "get") as read:
+            self.ingestor._save("docs/a", {"document_id": "docs/a"})
+        read.assert_not_called()
+        self.assertEqual(self.store.writes, [{"document_id": "docs/a"}])
 
     def test_response_id_mismatch_keeps_original_intent(self):
         self.api.bad_ack = True
@@ -581,7 +581,6 @@ class BeadsCLITest(unittest.TestCase):
         self.addCleanup(env.stop)
         self.rows = []
         self.calls = []
-        self.temp_paths = []
         self.custom_types = "existing,other"
         self.fail_read = False
         self.create_error = False
@@ -609,12 +608,7 @@ class BeadsCLITest(unittest.TestCase):
             self.custom_types = args[3]
         elif args[0] in ("create", "update"):
             metadata_arg = args[args.index("--metadata") + 1]
-            self.assertTrue(metadata_arg.startswith("@"))
-            path = Path(metadata_arg[1:])
-            self.assertTrue(path.is_file())
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.temp_paths.append(path)
-            metadata = json.loads(path.read_text())
+            metadata = json.loads(metadata_arg)
             self.assertEqual(set(metadata), {"hindsight"})
             if args[0] == "create":
                 self.assertNotIn("--id", args)
@@ -656,7 +650,6 @@ class BeadsCLITest(unittest.TestCase):
         self.assertEqual(len(self.rows), 1)
         self.assertEqual(self.custom_types, "existing,other,hindsight-document,hindsight-bank")
         self.assertEqual(sum(call[:2] == ["config", "get"] for call in self.calls), 1)
-        self.assertTrue(all(not path.exists() for path in self.temp_paths))
         self.assertEqual(self.calls[-1][0], "list")
 
     def test_existing_types_need_no_config_set(self):
@@ -693,7 +686,6 @@ class BeadsCLITest(unittest.TestCase):
         with self.assertRaises(ingestion.Error):
             self.put()
         self.assertEqual(len(self.rows), 1)
-        self.assertTrue(all(not path.exists() for path in self.temp_paths))
         self.create_error = False
         self.put()
         self.assertEqual(len(self.rows), 1)

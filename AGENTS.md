@@ -45,3 +45,18 @@
   a blind retry. Normal retain supports idempotent UUID submissions. Batch parent
   operation summaries omit children's extraction error counts; fetch each child's
   full status before recording a successful receipt.
+- The offline suite makes no LLM calls; `test/evaluate.py` is a separate opt-in
+  live evaluation. A 2026-09-05 profile on this Mac measured 157.7 seconds for
+  183 tests: 124 seconds in `test_pack.py`, versus 0.026 seconds for the 67
+  in-process ingestion tests. The subprocess suites logged about 2,500 mock
+  command launches, each starting Python; PATH also routes `python3` through
+  mise. Prefer in-process coverage for state/validation permutations and a
+  smaller set of actual CLI dispatch tests rather than blaming Python execution
+  speed or assuming the suite is waiting for extraction.
+- Beads metadata is inline JSON as of `db2a79e`, not an `@file` argument.
+  The adapter tests initially retained the old file contract and failed despite
+  the production fix. Keep fixtures aligned with the actual CLI contract;
+  `BeadsStore.put` owns write confirmation, not its callers.
+- Keep `test/__init__.py`: without it, targeted `test.test_*` invocations can
+  resolve Python's installed `test` package instead of this suite. Discovery
+  with `-s test` can still pass while the targeted pre-push command fails.

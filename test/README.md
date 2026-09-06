@@ -1,24 +1,50 @@
 # Verifying the pack
 
-Run the offline production-path tests:
+Run the fast, in-process checks used by pre-push:
+
+```bash
+lefthook run pre-push
+```
+
+Run the complete offline suite, including shell, Git, and installed-gc checks:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py' -v
 gc lint .
 ```
 
-All repositories, mock Beads records, subprocess logs and reports go into
-temporary directories. Git tests use local bare origins and temporary clones or
-worktrees. Most tests intercept gc, Hindsight and curl. A dispatch test also
-uses the installed gc with a temporary city config and mocked Hindsight, without
-registering or starting the city. No test contacts live services. Go is needed
-to render the real prompt templates. Tests cover queue routing, endpoint and credential consistency, schema
-validation, durable pinned records, intent-before-POST, failed retains that
-already stamped bank hashes, original-operation recovery, and machine handoffs
-through shared Beads. It also covers mandatory fetch, published branch selection,
-dirty/unpushed content exclusion, traversal failures, unchanged/revised docs,
-fail-closed reprocess acknowledgement loss, partial-root GONE, full-scan freshness,
-unresolved attempts, paginated audits and memory bumps.
+The suite uses standard-library `unittest` and `unittest.mock`. Keep validation
+and failure permutations in-process; use shell tests for command composition,
+not to repeat the ingestion state machine.
+
+| Tests | Responsibility |
+|---|---|
+| `test_ingestion.py` | Recovery, receipts, lost acknowledgements, child extraction errors, Beads and HTTP contracts |
+| In-process classes in `test_pack.py` | Schema, shipping orchestration, scan health, GONE boundaries, request validation |
+| `MemoryCLITest` | Memory payload hashes, deliberate reports, recovery markers and errors |
+| `test_git_snapshot.py` | Real Git publication branches, fetch failures, immutable snapshots, worktrees |
+| `PackShellTest` and `MemoryShellTest` | Narrow shipping/recovery paths, queueing, audits, recovery before bumping hit counts |
+| `test_commands.py` | Wrapper forwarding, admission guards, real Gas City rendering and dispatch |
+
+All fixture repositories, service records and logs go into temporary directories.
+No offline test contacts live services or makes LLM calls. Only the Git tests
+and two shipping shell tests create repositories. The small shell-service fixture
+supports those smoke tests, not a general Beads/Hindsight simulator. Detailed
+recovery behavior belongs in `test_ingestion.py`.
+
+Gas City compatibility checks use `gc prime --strict` and real command dispatch
+against a temporary city, without registering or starting it. They skip explicitly
+if `gc` is absent. No Go compiler or replica renderer is needed. To check a specific
+Gas City binary:
+
+```bash
+GC_TEST_BIN=/path/to/gc python3 test/test_commands.py GasCityCompatibilityTest
+```
+
+Pre-push runs only the in-process classes listed in `lefthook.yml`; pre-commit
+still runs `gc lint .`. Run full discovery before publishing changes to scripts,
+Git traversal, commands, prompts, or formulas. The full suite remains explicit,
+not a hidden background job or an installed CI workflow.
 
 The historical `results/` files remain evidence of the original experiment.
 They are not golden answers: the conventions model includes an unsupported

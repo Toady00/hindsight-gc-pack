@@ -181,6 +181,7 @@ class BeadsStore:
         self._types_ready = True
 
     def put(self, kind, document_id, data):
+        """Return the bead ID only after reading back and validating the write."""
         require_writer()
         row, _ = self._find(kind, document_id)
         identity = self._identity(kind, document_id)
@@ -383,9 +384,8 @@ class Ingestor:
         self.store, self.api = store, api
 
     def _save(self, document_id, state):
+        # The store owns write confirmation; a second read adds no guarantee.
         self.store.put("document", document_id, state)
-        if self.store.get("document", document_id) != state:
-            raise Error("durable attempt read-back mismatch; no external write is safe")
 
     def _submit(self, document_id, state):
         self.api.capabilities()
