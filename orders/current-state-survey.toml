@@ -1,0 +1,15 @@
+# Periodic re-survey of each rig's current state. Deliberately slow: a
+# stale survey costs at most a cadence, an eager one costs agent time on
+# every rig every fire. Runs with the formula's defaults (branch + PR for
+# human review); `gc order run current-state-survey --rig <rig>` fires it
+# by hand, `--var publish=none` dry-runs into a preserved worktree.
+#
+# scope = "rig": one order per rig that imports this pack. An open run
+# for a rig suppresses the next fire for that rig until it settles.
+[order]
+description = "Regenerate the rig's current-state survey document"
+scope = "rig"
+formula = "current-state-survey"
+trigger = "cron"
+schedule = "0 4 1 * *"
+pool = "surveyor"

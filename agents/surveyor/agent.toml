@@ -1,0 +1,21 @@
+# The surveyor — authors a rig's `current-state` document.
+#
+# Rig-scoped pool, deliberately pool-shaped (explicit min = 0): one
+# instance per rig materializes when a current-state-survey step is
+# routed to it and disappears at idle. It is not a named session and
+# must not become one — surveys are rare (monthly, or by hand) and a
+# standing session would be waste.
+#
+# max_active_sessions = 1 keeps surveys of one rig serial: two concurrent
+# runs would fight over the same branch and worktree.
+#
+# Every mechanical step (worktree, frontmatter, publish, cleanup) is a
+# script under assets/scripts/survey.sh; the agent's judgment is spent
+# on reading the code and writing the document.
+
+scope = "rig"
+wake_mode = "fresh"
+min_active_sessions = 0
+max_active_sessions = 1
+idle_timeout = "15m"
+nudge = "Run gc hook --claim --json now; if it returns work, execute the claimed step immediately."

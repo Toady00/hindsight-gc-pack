@@ -10,9 +10,11 @@
 # references). The retain contract's enforcement point is the schema
 # (schemas/docs/derive); the skills carry the working references.
 #
-# Referenced by workspace.pack (the archivist is city-scoped). Rigs need
-# no per-rig sessions from this pack — rig agents consume the skills and
-# call the read patterns; only the archivist writes.
+# Referenced by workspace.pack (the archivist is city-scoped). The one
+# rig-scoped agent, the surveyor, is a scale-to-zero pool that only
+# exists while a current-state survey is running; every other rig agent
+# consumes the skills and calls the read patterns. Only the archivist
+# writes to the bank.
 
 [pack]
 name = "hindsight"
@@ -25,10 +27,14 @@ description = "Shared platform memory on Hindsight: doc shipping, bank maintenan
 # formula at it. max_active_sessions = 1 in its agent.toml is what
 # structurally enforces the single-writer rule — do not raise it.
 #
-# Scope: this pack is strictly the hindsight operator — shipping what the
-# docs tree says and maintaining the bank. Doc creation and approval flows
+# Scope: this pack is the hindsight operator — shipping what the docs
+# tree says and maintaining the bank — plus one producer it owns: the
+# `current-state` survey (agents/surveyor, formulas/current-state-survey),
+# because that doc type's id, strategy and frontmatter are defined by
+# this pack's retain contract. All other doc creation and approval flows
 # live in workflow packs that depend on this one; this pack never decides
-# what to ship.
+# what to ship. The survey publishes through git (branch + PR by
+# default), so it still reaches the bank only via the ordinary ship path.
 [[named_session]]
 template = "archivist"
 scope = "city"

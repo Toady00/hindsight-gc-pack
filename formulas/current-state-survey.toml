@@ -1,0 +1,77 @@
+description = """
+Survey a rig's codebase and publish its `current-state` document.
+
+One surveyor works the steps in order inside a dedicated git worktree —
+never the rig root checkout. The mechanical steps (worktree, frontmatter,
+push/PR, cleanup) are the pack's `survey` command; the agent's judgment
+goes into reading the code and writing `{{output_dir}}/README.md`.
+
+Publishing (`publish` var): `pr` pushes a survey branch and opens a
+PR/MR for human review — the document ships to the bank when it merges,
+with `source: human`. `direct` pushes to the default branch and ships
+within the hour as `source: agent`. `none` commits on the branch and
+keeps the worktree for inspection. The scheduled order runs with the
+defaults; `gc order run current-state-survey --rig <rig> --var
+publish=none` is the dry run.
+
+Cleanup is a teardown scope step: it runs after the workflow settles,
+removes the worktree only when the run passed and its commit is safely
+on origin, and otherwise preserves it with the reason on the root bead.
+"""
+formula = "current-state-survey"
+version = "0.1.0"
+
+# gc.run_target must be the binding-qualified name: imported pack agents
+# resolve only as <binding>.<name> (config.AgentMatchesIdentity), so this
+# formula assumes the pack is imported as `hindsight`, like the README's
+# `gc hindsight ship`. The order's `pool` is qualified for us and stays bare.
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars]
+
+[vars.output_dir]
+description = "Rig-relative directory that holds the survey document (README.md inside it)"
+default = "docs/current-state"
+
+[vars.publish]
+description = "pr (branch + PR, source: human) | direct (push to default branch, source: agent) | none (commit locally, keep worktree)"
+default = "pr"
+
+[vars.pr_tool]
+description = "auto (infer from origin host) | gh | glab"
+default = "auto"
+
+[[steps]]
+id = "prepare-worktree"
+title = "Prepare the survey worktree"
+description_file = "../assets/workflows/current-state-survey/prepare-worktree.md"
+metadata = { "gc.run_target" = "hindsight.surveyor", "gc.scope_ref" = "worktree", "gc.scope_role" = "setup", "gc.on_fail" = "abort_scope" }
+
+[[steps]]
+id = "survey"
+title = "Survey the codebase and write the document"
+needs = ["prepare-worktree"]
+description_file = "../assets/workflows/current-state-survey/survey.md"
+metadata = { "gc.run_target" = "hindsight.surveyor", "gc.scope_ref" = "worktree", "gc.scope_role" = "member", "gc.on_fail" = "abort_scope" }
+
+[[steps]]
+id = "publish"
+title = "Publish the survey"
+needs = ["survey"]
+description_file = "../assets/workflows/current-state-survey/publish.md"
+metadata = { "gc.run_target" = "hindsight.surveyor", "gc.scope_ref" = "worktree", "gc.scope_role" = "member", "gc.on_fail" = "abort_scope" }
+
+[[steps]]
+id = "worktree"
+title = "Worktree scope"
+needs = ["publish"]
+metadata = { "gc.kind" = "scope", "gc.scope_name" = "worktree", "gc.scope_role" = "body" }
+
+[[steps]]
+id = "cleanup"
+title = "Remove the survey worktree"
+needs = ["worktree"]
+description_file = "../assets/workflows/current-state-survey/cleanup.md"
+metadata = { "gc.run_target" = "hindsight.surveyor", "gc.kind" = "cleanup", "gc.scope_ref" = "worktree", "gc.scope_role" = "teardown" }

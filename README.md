@@ -41,15 +41,20 @@ extraction and apply forward-only (see "Two properties worth knowing").
 |---|---|
 | `pack.toml` | Pack manifest; declares the `archivist` city session |
 | `agents/archivist/` | The bank's **single writer**. `max_active_sessions = 1` structurally enforces write serialization |
+| `agents/surveyor/` | Rig-scoped, scale-to-zero pool that authors a rig's `current-state` survey. Reads code in an isolated worktree; every mechanical step is `survey.sh` |
 | `formulas/mol-hindsight-ship.toml` | Reconcile docs trees → bank (validate, ship changed, poll to terminal) |
 | `formulas/mol-hindsight-consolidate.toml` | Nightly: audit first (tags, config drift, mental-model overreach), consolidation as ensure-and-wait backstop — auto-consolidation handles freshness |
+| `formulas/current-state-survey.toml` | v2 workflow: worktree → survey → publish (`pr` default, `direct`, `none`) → teardown cleanup. Step prompts in `assets/workflows/current-state-survey/` |
 | `orders/ship-sync.toml` | Hourly convergence backstop — makes all other ship triggers non-load-bearing |
 | `orders/consolidate.toml` | Nightly audit + consolidation backstop |
+| `orders/current-state-survey.toml` | Monthly per-rig re-survey; `gc order run current-state-survey --rig <rig>` fires it by hand |
 | `commands/ship/` | `gc <binding> ship` — ship the docs manually at any point (auto-resolves roots; owns `--dry-run` for previews). Pack commands are namespaced by the import binding, so `[imports.hindsight]` makes it `gc hindsight ship` |
+| `commands/survey/` | `gc <binding> survey prepare\|show\|stamp\|publish\|cleanup <root>` — the survey's mechanical steps, shared by the formula and humans |
 | `commands/read/`, `commands/maintain/`, `commands/retain/`, `commands/status/` | `gc hindsight read`, `gc hindsight maintain`, `gc hindsight retain`, `gc hindsight status`: reads, guarded maintenance and bank-native retention, and shared Beads health |
 | `assets/scripts/ship-docs.sh` | Git-only docs shipping from freshly fetched origin branches. Shared Beads receipts track intent, recovery and confirmed completion; bank hashes alone never prove success. Validation, drain-before-ship, operation polling and GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
+| `assets/scripts/survey.sh` | Survey mechanics: worktree under `<city>/.gc/worktrees/<rig>/`, frontmatter stamped and validated through `schemas/docs/derive` (`source: human` for PR runs, `agent` otherwise), push/PR via `gh` or `glab` (inferred from origin), safety-gated cleanup. Handoff state lives on the workflow root bead |
 | `schemas/` | Pluggable doc dialects: `docs` (the pack's frontmatter contract, the default) and `null` (raw passthrough). Each is `derive` + `audit-vocab.json` — see "The schema layer" |
 | `skills/hindsight-memory/` | Read patterns for every agent: reflect/recall cadence, scoping, status semantics, `tag_groups` caveats |
 | `skills/hindsight-shipping/` | Write patterns: frontmatter contract (the default `docs` dialect), approval recording, agent-contributed memory mechanics |
@@ -63,9 +68,11 @@ Install into a city (path import while the pack is local):
 source = "../hindsight"
 ```
 
-Place that import in `city.toml` so the archivist expands city-scoped.
-Rig agents need no sessions from this pack — they consume the two skills.
-The pack commands in prompts and formulas use the `hindsight` import binding.
+Place that import in `city.toml` so the archivist expands city-scoped and
+the surveyor expands once per rig (idle until a survey is routed to it).
+Other rig agents need no sessions from this pack — they consume the two
+skills. The formula addresses the surveyor as `hindsight.surveyor`, so the
+import binding must be `hindsight`.
 
 ## Using this pack
 
@@ -95,6 +102,11 @@ updating health, but still fetches Git and reads the bank and city Beads store.
 The first word after `gc` is your import binding name.
 Revise by editing in place; retire with `status: deprecated` — never
 delete.
+
+The survey producer `assets/scripts/survey.sh` still omits the required
+`status` field. Its generated frontmatter fails current validation until that
+producer is fixed separately. Choose status deliberately; do not bypass the
+validator or treat a survey as an adopted decision.
 
 **Reading agent — query memory:**
 
