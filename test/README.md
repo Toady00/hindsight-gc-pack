@@ -25,10 +25,12 @@ not to repeat the ingestion state machine.
 | `test_git_snapshot.py` | Real Git publication branches, fetch failures, immutable snapshots, worktrees |
 | `PackShellTest` and `MemoryShellTest` | Narrow shipping/recovery paths, queueing, audits, recovery before bumping hit counts |
 | `test_commands.py` | Wrapper forwarding, admission guards, real Gas City rendering and dispatch |
+| `test_survey.py` | Real local Git worktrees, survey validation, retries, publication and cleanup with mocked Beads/forge commands |
+| `test_survey_integration.py` | Installed Gas City survey rendering, compilation, rig routing, variable persistence and scope lifecycle in unregistered fixture cities |
 
 All fixture repositories, service records and logs go into temporary directories.
 No offline test contacts live services or makes LLM calls. Only the Git tests
-and two shipping shell tests create repositories. The small shell-service fixture
+and shipping/survey shell tests create repositories. The small shell-service fixture
 supports those smoke tests, not a general Beads/Hindsight simulator. Detailed
 recovery behavior belongs in `test_ingestion.py`.
 
@@ -45,6 +47,10 @@ Pre-push runs only the in-process classes listed in `lefthook.yml`; pre-commit
 still runs `gc lint .`. Run full discovery before publishing changes to scripts,
 Git traversal, commands, prompts, or formulas. The full suite remains explicit,
 not a hidden background job or an installed CI workflow.
+
+For the first agent-driven survey on a live rig, follow [SURVEY.md](SURVEY.md).
+Offline tests do not establish real provider wakeup, signing access from the
+provider process, or live GitHub/GitLab authentication.
 
 The historical `results/` files remain evidence of the original experiment.
 They are not golden answers: the conventions model includes an unsupported

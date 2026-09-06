@@ -54,7 +54,7 @@ extraction and apply forward-only (see "Two properties worth knowing").
 | `assets/scripts/ship-docs.sh` | Git-only docs shipping from freshly fetched origin branches. Shared Beads receipts track intent, recovery and confirmed completion; bank hashes alone never prove success. Validation, drain-before-ship, operation polling and GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
-| `assets/scripts/survey.sh` | Survey mechanics: worktree under `<city>/.gc/worktrees/<rig>/`, frontmatter stamped and validated through `schemas/docs/derive` (`source: human` for PR runs, `agent` otherwise), push/PR via `gh` or `glab` (inferred from origin), safety-gated cleanup. Handoff state lives on the workflow root bead |
+| `assets/scripts/survey.sh` | Survey mechanics: worktree under `<city>/.gc/worktrees/<rig>/`, validated `status: draft` / `source: agent` frontmatter, push/PR via `gh` or `glab`, safety-gated cleanup. Handoff state lives on the workflow root bead |
 | `schemas/` | Pluggable doc dialects: `docs` (the pack's frontmatter contract, the default) and `null` (raw passthrough). Each is `derive` + `audit-vocab.json` — see "The schema layer" |
 | `skills/hindsight-memory/` | Read patterns for every agent: reflect/recall cadence, scoping, status semantics, `tag_groups` caveats |
 | `skills/hindsight-shipping/` | Write patterns: frontmatter contract (the default `docs` dialect), approval recording, agent-contributed memory mechanics |
@@ -68,11 +68,13 @@ Install into a city (path import while the pack is local):
 source = "../hindsight"
 ```
 
-Place that import in `city.toml` so the archivist expands city-scoped and
-the surveyor expands once per rig (idle until a survey is routed to it).
-Other rig agents need no sessions from this pack — they consume the two
-skills. The formula addresses the surveyor as `hindsight.surveyor`, so the
-import binding must be `hindsight`.
+Place that import in `city.toml` for the city-scoped archivist. To enable
+surveys on a rig, also add `[rigs.imports.hindsight]` to that rig's existing
+`[[rigs]]` entry, with `source` pointing to this pack. The rig import exposes
+the survey order; the surveyor stays idle until work is routed to it.
+The formula addresses the surveyor as `hindsight.surveyor`, so the import
+binding must be `hindsight`. See the [live survey test](test/SURVEY.md) for
+configuration and verification steps.
 
 ## Using this pack
 
@@ -103,10 +105,27 @@ The first word after `gc` is your import binding name.
 Revise by editing in place; retire with `status: deprecated` — never
 delete.
 
-The survey producer `assets/scripts/survey.sh` still omits the required
-`status` field. Its generated frontmatter fails current validation until that
-producer is fixed separately. Choose status deliberately; do not bypass the
-validator or treat a survey as an adopted decision.
+**Operator - survey a rig:**
+
+For the first live test, create a local-only run from the city directory:
+
+```bash
+gc formula cook current-state-survey --rig <rig> --var publish=none --json
+```
+
+This starts real agent work and creates a signed local commit, but does not
+push or call Hindsight. The worktree remains for inspection. Do not start a
+second survey while one is active. The installed `gc order run` accepts
+`--var` but silently drops its values; do not use that path to suppress
+publishing. The scheduled order and `gc order run current-state-survey
+--rig <rig>` use the default PR publication mode.
+
+Generated surveys are `status: draft` and `source: agent`, including PRs.
+A merge does not automatically change those fields. Human review can promote
+the status separately; a current-state survey records observations, not an
+adopted design decision. Draft documents on the canonical branch still ship
+through the normal Git ingestion path. See [test/SURVEY.md](test/SURVEY.md)
+for prerequisites, acceptance checks, and recovery.
 
 **Reading agent — query memory:**
 

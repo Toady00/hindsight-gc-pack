@@ -12,7 +12,7 @@ edit anything in the rig root checkout.
    worktree and branch, records `work_dir` and the run's options on
    `<root>`, and prints them as `key=value` lines.
 3. Copy the printed lines into this bead's notes. Verify with
-   `gc bd show <root> --json` that `work_dir` is set and is not the rig
+   `gc bd --rig "$GC_RIG" show <root> --json` that `work_dir` is set and is not the rig
    root.
 
 Close with `gc.outcome=pass`. If the command exits non-zero, close with

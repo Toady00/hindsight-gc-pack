@@ -10,7 +10,7 @@
 # references). The retain contract's enforcement point is the schema
 # (schemas/docs/derive); the skills carry the working references.
 #
-# Referenced by workspace.pack (the archivist is city-scoped). The one
+# Imported through imports.hindsight (the archivist is city-scoped). The one
 # rig-scoped agent, the surveyor, is a scale-to-zero pool that only
 # exists while a current-state survey is running; every other rig agent
 # consumes the skills and calls the read patterns. Only the archivist

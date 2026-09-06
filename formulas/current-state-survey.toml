@@ -7,15 +7,19 @@ push/PR, cleanup) are the pack's `survey` command; the agent's judgment
 goes into reading the code and writing `{{output_dir}}/README.md`.
 
 Publishing (`publish` var): `pr` pushes a survey branch and opens a
-PR/MR for human review — the document ships to the bank when it merges,
-with `source: human`. `direct` pushes to the default branch and ships
-within the hour as `source: agent`. `none` commits on the branch and
-keeps the worktree for inspection. The scheduled order runs with the
-defaults; `gc order run current-state-survey --rig <rig> --var
-publish=none` is the dry run.
+PR/MR for human review. `direct` pushes to the default branch. Both reach
+the bank through normal Git ingestion after publication to the canonical
+branch. All modes stamp `source: agent` and `status: draft`; review approval
+is separate. `none` commits on the branch and keeps the worktree for
+inspection. The scheduled order runs with the
+defaults. For a local-only run use `gc formula cook current-state-survey
+--rig <rig> --var publish=none`. This still creates work and a local commit;
+it is not a read-only dry run. The installed `gc order run` accepts `--var`
+but loses the override when materializing steps, so do not use it to
+suppress publishing. Do not cook a second run while a survey is active.
 
-Cleanup is a teardown scope step: it runs after the workflow settles,
-removes the worktree only when the run passed and its commit is safely
+Cleanup is a teardown scope step: it runs after the worktree scope settles,
+removes the worktree only when that scope passed and its commit is safely
 on origin, and otherwise preserves it with the reason on the root bead.
 """
 formula = "current-state-survey"
@@ -23,8 +27,9 @@ version = "0.1.0"
 
 # gc.run_target must be the binding-qualified name: imported pack agents
 # resolve only as <binding>.<name> (config.AgentMatchesIdentity), so this
-# formula assumes the pack is imported as `hindsight`, like the README's
-# `gc hindsight ship`. The order's `pool` is qualified for us and stays bare.
+# formula assumes the pack is imported as `hindsight`. Routing resolves the
+# binding-qualified target in the order's rig context to <rig>/hindsight.surveyor.
+# The order's `pool` is qualified for us and stays bare.
 
 [requires]
 formula_compiler = ">=2.0.0"
@@ -36,7 +41,7 @@ description = "Rig-relative directory that holds the survey document (README.md 
 default = "docs/current-state"
 
 [vars.publish]
-description = "pr (branch + PR, source: human) | direct (push to default branch, source: agent) | none (commit locally, keep worktree)"
+description = "pr (branch + PR) | direct (push to default branch) | none (commit locally, keep worktree); all produce agent-authored drafts"
 default = "pr"
 
 [vars.pr_tool]

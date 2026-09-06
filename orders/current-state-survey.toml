@@ -2,10 +2,15 @@
 # stale survey costs at most a cadence, an eager one costs agent time on
 # every rig every fire. Runs with the formula's defaults (branch + PR for
 # human review); `gc order run current-state-survey --rig <rig>` fires it
-# by hand, `--var publish=none` dry-runs into a preserved worktree.
+# by hand with defaults. For local-only work use `gc formula cook
+# current-state-survey --rig <rig> --var publish=none`. Installed order run
+# accepts --var but drops overrides during instantiation; it is NOT a dry run.
 #
 # scope = "rig": one order per rig that imports this pack. An open run
 # for a rig suppresses the next fire for that rig until it settles.
+# Import through [rigs.imports.hindsight] for each rig. A city-only import
+# does not create a rig order. publish=none still writes and commits a survey;
+# it only suppresses the remote push and PR, not local work.
 [order]
 description = "Regenerate the rig's current-state survey document"
 scope = "rig"

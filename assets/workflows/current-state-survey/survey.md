@@ -7,7 +7,7 @@ Survey the repository as it is at `HEAD` of the worktree and write
 `survey_doc` (`{{output_dir}}/README.md`) — the whole document, replaced
 each run. It is the repository's current-state record: what the code does
 today, for a reader who has never opened it. Start the file with a top-level
-heading; leave frontmatter out — it is stamped in step 3.
+heading; leave frontmatter out. The stamp command adds it before committing.
 
 Contents, in this order:
 
@@ -31,21 +31,24 @@ need: enough to orient and find the right file, not a line-by-line tour.
 
 Then, still in the worktree:
 
-1. Commit the document so `git status` is clean:
-
-       git add "{{output_dir}}/README.md"
-       git commit -m "docs: current-state survey of $GC_RIG ($(date -u +%Y-%m-%d))"
-
-2. Stamp the frontmatter and validate it against the pack's schema
+1. Stamp the frontmatter and validate it against the pack's schema
    (never type the frontmatter yourself):
 
        gc hindsight survey stamp <root>
 
-   It prints the stamped block. Commit again:
+2. Inspect `git status --short`, the document diff, and the index. If any
+   unrelated files are changed or staged, stop and report them; never stage,
+   unstage, reset, or commit someone else's changes. Commit only the stamped
+   document, in one explicitly signed commit:
 
-       git commit -am "docs: stamp current-state frontmatter"
+       git add -- "{{output_dir}}/README.md"
+       git diff --cached --check
+       git commit -S --only -m "docs: current-state survey of $GC_RIG ($(date -u +%Y-%m-%d))" -- "{{output_dir}}/README.md"
 
-3. Verify `git status` is clean and the file begins with `---`.
+   A signing failure is a failed step. Do not retry unsigned or bypass hooks.
+
+3. Verify `git status` is clean and the file begins with `---`. Do not make
+   a second frontmatter commit or use `git commit -am`.
 
 Close with `gc.outcome=pass`. If the schema refuses the stamp, or you could
 not complete the survey, close with `gc.outcome=fail` and the reason in

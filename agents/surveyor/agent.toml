@@ -6,8 +6,9 @@
 # must not become one — surveys are rare (monthly, or by hand) and a
 # standing session would be waste.
 #
-# max_active_sessions = 1 keeps surveys of one rig serial: two concurrent
-# runs would fight over the same branch and worktree.
+# max_active_sessions = 1 limits active surveyor sessions, not open runs.
+# Steps from separate runs can interleave; worktrees and branches must be
+# keyed by the workflow root, and operators should not cook overlapping runs.
 #
 # Every mechanical step (worktree, frontmatter, publish, cleanup) is a
 # script under assets/scripts/survey.sh; the agent's judgment is spent
