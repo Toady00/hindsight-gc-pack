@@ -192,16 +192,16 @@ class BeadsStore:
         # Beads --metadata merges top-level keys. Send only our key so unrelated
         # metadata edits cannot be overwritten by a stale read.
         metadata = {"hindsight": dict(identity, schema_version=self.VERSION, data=data)}
+        metadata_json = _json(metadata)
         self._register_types()
-        with _temporary_json(metadata) as path:
-            if row:
-                self._call("update", row["id"], "--metadata", "@" + path, "--json")
-            else:
-                title = "Hindsight document: " + document_id if kind == "document" else "Hindsight bank: " + self.bank
-                self._call("create", "--title", title,
-                           "--status", "pinned", "--type", self.TYPES[kind],
-                           "--label", "hindsight:records," + self._key(kind, document_id),
-                           "--metadata", "@" + path, "--json")
+        if row:
+            self._call("update", row["id"], "--metadata", metadata_json, "--json")
+        else:
+            title = "Hindsight document: " + document_id if kind == "document" else "Hindsight bank: " + self.bank
+            self._call("create", "--title", title,
+                       "--status", "pinned", "--type", self.TYPES[kind],
+                       "--label", "hindsight:records," + self._key(kind, document_id),
+                       "--metadata", metadata_json, "--json")
         confirmed, stored = self._find(kind, document_id)
         if stored != data or (row and confirmed["id"] != row["id"]):
             raise Error("Beads write read-back did not match; no external write is safe")
