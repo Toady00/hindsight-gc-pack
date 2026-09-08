@@ -115,10 +115,15 @@ gc formula cook current-state-survey --rig <rig> --var publish=none --json
 
 This starts real agent work and creates a signed local commit, but does not
 push or call Hindsight. The worktree remains for inspection. Do not start a
-second survey while one is active. The installed `gc order run` accepts
-`--var` but silently drops its values; do not use that path to suppress
-publishing. The scheduled order and `gc order run current-state-survey
+second survey while one is active. Verify `--publish "none"` in the persisted
+prepare step; older `gc order run` builds silently dropped overrides.
+The scheduled order and `gc order run current-state-survey
 --rig <rig>` use the default PR publication mode.
+
+New surveys write `docs/current-state.md`. To choose another file, use
+`gc formula cook current-state-survey --rig <rig> --var output_file=docs/survey.md`
+with the desired publication mode. Active surveys keep their saved `survey_doc`
+path, including `docs/current-state/README.md`; do not move their files mid-run.
 
 Generated surveys are `status: draft` and `source: agent`, including PRs.
 A merge does not automatically change those fields. Human review can promote

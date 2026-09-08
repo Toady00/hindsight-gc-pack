@@ -53,9 +53,10 @@ From the city directory:
 gc formula cook current-state-survey --rig <rig> --var publish=none --json
 ```
 
-Record the returned workflow root ID as `<root>`. The installed `gc order run`
-accepts `--var` but materializes defaults, so **do not use `order run --var
-publish=none`**. The verified `formula cook` path persists the override.
+Record the returned workflow root ID as `<root>`. Current integration tests
+verify overrides through both `formula cook` and `order run --var`. Older
+`gc` builds silently used defaults for order overrides; check persisted
+instructions before relying on local-only publication.
 
 Inspect the actual step instructions, not just the command's exit code:
 
@@ -84,7 +85,9 @@ must be `survey/current-state-<root>`, not the rig's default branch.
 - Prepare, survey and publish close with `gc.outcome=pass`; the worktree scope
   body closes with pass, and cleanup records preservation for `publish=none`.
   Root finalization and cleanup may finish in either order, so inspect both.
-- The document exists at `<work_dir>/docs/current-state/README.md` by default.
+- New runs default to `<work_dir>/docs/current-state.md`. With a custom
+  `output_file`, check that full file path instead. Active runs keep the
+  `survey_doc` recorded on their root, including `docs/current-state/README.md`.
   Its frontmatter contains `id: current-state.<rig>`, `type: current-state`,
   `status: draft`, and `source: agent`.
 - The content cites real code paths/lines, explains architecture and entry

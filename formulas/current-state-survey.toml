@@ -4,7 +4,7 @@ Survey a rig's codebase and publish its `current-state` document.
 One surveyor works the steps in order inside a dedicated git worktree —
 never the rig root checkout. The mechanical steps (worktree, frontmatter,
 push/PR, cleanup) are the pack's `survey` command; the agent's judgment
-goes into reading the code and writing `{{output_dir}}/README.md`.
+goes into reading the code and writing `{{output_file}}`.
 
 Publishing (`publish` var): `pr` pushes a survey branch and opens a
 PR/MR for human review. `direct` pushes to the default branch. Both reach
@@ -14,9 +14,9 @@ is separate. `none` commits on the branch and keeps the worktree for
 inspection. The scheduled order runs with the
 defaults. For a local-only run use `gc formula cook current-state-survey
 --rig <rig> --var publish=none`. This still creates work and a local commit;
-it is not a read-only dry run. The installed `gc order run` accepts `--var`
-but loses the override when materializing steps, so do not use it to
-suppress publishing. Do not cook a second run while a survey is active.
+it is not a read-only dry run. Verify `publish=none` in the persisted prepare
+step before relying on it: older `gc order run` builds silently dropped
+overrides. Do not cook a second run while a survey is active.
 
 Cleanup is a teardown scope step: it runs after the worktree scope settles,
 removes the worktree only when that scope passed and its commit is safely
@@ -36,9 +36,9 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 
-[vars.output_dir]
-description = "Rig-relative directory that holds the survey document (README.md inside it)"
-default = "docs/current-state"
+[vars.output_file]
+description = "Rig-relative file path of the survey document"
+default = "docs/current-state.md"
 
 [vars.publish]
 description = "pr (branch + PR) | direct (push to default branch) | none (commit locally, keep worktree); all produce agent-authored drafts"

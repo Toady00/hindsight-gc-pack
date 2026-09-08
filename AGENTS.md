@@ -60,3 +60,13 @@
 - Keep `test/__init__.py`: without it, targeted `test.test_*` invocations can
   resolve Python's installed `test` package instead of this suite. Discovery
   with `-s test` can still pass while the targeted pre-push command fails.
+- Survey path changes must account for persisted step descriptions as well as
+  root metadata. Already-cooked prepare steps still pass `--output-dir`, and
+  their survey steps name `<dir>/README.md`. Keep that CLI adapter and the saved
+  `survey_doc`; new runs use `output_file` / `--output-file`. Do not migrate
+  active worktree files: publish permits changes only to the saved document.
+- On 2026-09-07 the installed `gc order run --var publish=none` preserved the
+  override, contrary to the earlier integration assertion and survey warnings.
+  Keep testing persisted descriptions and command dispatch, not just exit codes;
+  older builds silently used defaults. The suite now checks both the override
+  and default PR publication.

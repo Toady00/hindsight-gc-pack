@@ -1,10 +1,11 @@
 # Survey compatibility pitfalls
 
-- The installed `gc` reports `dev`. It accepts `order run --var` but
-  materializes formula defaults instead of the supplied values. A successful
-  command exit does not prove `publish=none`. `formula cook --rig <rig>
-  --var publish=none` preserves the override in persisted step descriptions.
-  `test/test_survey_integration.py` tests both paths in disposable fixtures.
+- Older `gc` builds accepted `order run --var` but materialized formula
+  defaults instead of the supplied values. On 2026-09-07 the installed build
+  preserved `publish=none` through both order dispatch and formula cook.
+  A successful command exit alone does not prove `publish=none`; inspect the
+  persisted step descriptions. `test/test_survey_integration.py` tests both
+  paths in disposable fixtures, plus the default PR publication mode.
 - Cleanup and workflow finalization can both become ready after the worktree
   body closes. Gate cleanup on that body's closed status and `gc.outcome=pass`,
   not on the root outcome. Resolve the body by exact root, `gc.kind=scope`,

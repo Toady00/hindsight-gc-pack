@@ -4,7 +4,7 @@
 # document; everything mechanical (worktree, frontmatter, publish, cleanup)
 # is here so it can change without touching a prompt.
 #
-#   survey.sh prepare <root-bead-id> [--output-dir <dir>] [--publish pr|direct|none] [--pr-tool auto|gh|glab]
+#   survey.sh prepare <root-bead-id> [--output-file <file>] [--publish pr|direct|none] [--pr-tool auto|gh|glab]
 #   survey.sh show    <root-bead-id>
 #   survey.sh stamp   <root-bead-id>
 #   survey.sh publish <root-bead-id> [--body-file <file>]
@@ -34,7 +34,7 @@
 #                          worktree from gc's closed-bead reaper)
 #   survey_branch          survey/current-state-<root-bead-id>
 #   survey_default_branch  remote default branch the worktree is based on
-#   survey_output_dir      rig-relative output directory
+#   survey_output_dir      legacy handoffs only: directory containing README.md
 #   survey_doc             rig-relative path of the document
 #   survey_publish         pr | direct | none
 #   survey_pr_tool         auto | gh | glab
@@ -144,13 +144,17 @@ load_handoff() {
     || die "root $ROOT has no survey handoff — run 'prepare' first"
   [[ "$WORKTREE" == "$GC_CITY/.gc/worktrees/$GC_RIG/current-state-$ROOT" && "$BRANCH" == "survey/current-state-$ROOT" ]] || die "handoff path or branch does not belong to $ROOT"
   [[ "$(jq -r '.metadata.survey_rig_root' <<<"$saved")" == "$GC_RIG_ROOT" ]] || die "handoff belongs to another rig"
-  [[ "$DOC" == "$OUTPUT_DIR/README.md" ]] || die "handoff document does not match output directory"
+  if [[ -n "$OUTPUT_DIR" ]]; then
+    [[ "$DOC" == "$OUTPUT_DIR/README.md" ]] || die "handoff document does not match legacy output directory"
+  fi
+  OUTPUT_DIR="$(dirname "$DOC")"
   case "$PUBLISH" in pr|direct|none) ;; *) die "invalid handoff publish mode" ;; esac
   case "$PR_TOOL" in auto|gh|glab) ;; *) die "invalid handoff PR tool" ;; esac
   git check-ref-format "refs/heads/$DEFAULT_BRANCH" >/dev/null || die "invalid default branch"
   [[ "$BASE" =~ ^[0-9a-f]{40,64}$ ]] && rig_git cat-file -e "$BASE^{commit}" || die "invalid handoff base"
   safe_path "$GC_CITY" ".gc/worktrees/$GC_RIG/current-state-$ROOT"
   safe_path "$WORKTREE" "$DOC"
+  [[ ! -d "$WORKTREE/$DOC" ]] || die "survey document path is a directory"
   if [[ -e "$WORKTREE" ]]; then
     is_registered_worktree "$WORKTREE" || die "worktree is not owned by this rig"
     [[ "$(wt_git rev-parse --show-toplevel)" == "$WORKTREE" ]] || die "handoff is not a worktree root"
@@ -164,7 +168,7 @@ load_handoff() {
 # replacement must not redirect a stamp or cleanup into another checkout.
 safe_path() {
   local path="$1" relative="$2" part
-  [[ -n "$relative" && "$relative" != /* && "$relative" != *$'\n'* && "$relative" != *$'\r'* ]] || die "unsafe relative path"
+  [[ -n "$relative" && "$relative" != /* && "$relative" != */ && "$relative" != *$'\n'* && "$relative" != *$'\r'* ]] || die "unsafe relative path"
   local -a parts
   IFS=/ read -r -a parts <<<"$relative"
   for part in "${parts[@]}"; do
@@ -203,11 +207,17 @@ is_registered_worktree() {
 
 cmd_prepare() {
   require_root "${1:-}"; shift || true
-  local output_dir="docs/current-state" publish="pr" pr_tool="auto"
+  local output_file="docs/current-state.md" publish="pr" pr_tool="auto"
   local output_given=false publish_given=false tool_given=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --output-dir) [[ $# -ge 2 ]] || die "missing output directory"; output_dir="${2%/}"; output_given=true; shift 2 ;;
+      --output-file|--output-dir)
+        [[ $# -ge 2 ]] || die "missing output path"
+        $output_given && die "specify only one output path"
+        output_file="$2"
+        # Already-cooked workflows still invoke the directory-only flag.
+        [[ "$1" != --output-dir ]] || output_file="${2%/}/README.md"
+        output_given=true; shift 2 ;;
       --publish) [[ $# -ge 2 ]] || die "missing publish mode"; publish="$2"; publish_given=true; shift 2 ;;
       --pr-tool) [[ $# -ge 2 ]] || die "missing PR tool"; pr_tool="$2"; tool_given=true; shift 2 ;;
       *) die "prepare: unknown arg $1" ;;
@@ -215,19 +225,20 @@ cmd_prepare() {
   done
   case "$publish" in pr|direct|none) ;; *) die "--publish must be pr, direct or none (got '$publish')" ;; esac
   case "$pr_tool" in auto|gh|glab) ;; *) die "--pr-tool must be auto, gh or glab (got '$pr_tool')" ;; esac
-  safe_path "$GC_RIG_ROOT" "$output_dir/README.md"
   if [[ -n "$(bead_meta "$ROOT" survey_branch)" ]]; then
     load_handoff allow-missing
     [[ "$(bead_meta "$ROOT" survey_cleanup)" != removed ]] || die "survey already cleaned up; use a new root"
     if [[ ! -e "$WORKTREE" && -n "$(bead_meta "$ROOT" survey_cleanup_head)" ]]; then
       die "cleanup is incomplete; retry cleanup, not prepare"
     fi
-    if { $output_given && [[ "$output_dir" != "$OUTPUT_DIR" ]]; } \
+    if { $output_given && [[ "$output_file" != "$DOC" ]]; } \
       || { $publish_given && [[ "$publish" != "$PUBLISH" ]]; } \
       || { $tool_given && [[ "$pr_tool" != "$PR_TOOL" ]]; }; then
       die "prepare options conflict with the persisted handoff; use a new root"
     fi
   else
+    safe_path "$GC_RIG_ROOT" "$output_file"
+    [[ ! -d "$GC_RIG_ROOT/$output_file" ]] || die "survey document path is a directory"
     [[ -z "$(bead_meta "$ROOT" work_dir)" ]] || die "root already has a work_dir without a survey handoff"
     DEFAULT_BRANCH="$(resolve_default_branch)"
     rig_git fetch origin "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH" || gitdie "fetch failed"
@@ -243,8 +254,7 @@ cmd_prepare() {
     "survey_base=$BASE" \
     "survey_branch=$BRANCH" \
     "survey_default_branch=$DEFAULT_BRANCH" \
-    "survey_output_dir=$output_dir" \
-    "survey_doc=$output_dir/README.md" \
+    "survey_doc=$output_file" \
     "survey_publish=$publish" \
     "survey_pr_tool=$pr_tool"
     load_handoff allow-missing

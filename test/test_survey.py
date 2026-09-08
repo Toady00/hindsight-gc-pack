@@ -159,6 +159,9 @@ class SurveyTest(unittest.TestCase):
 
     def test_prepare_repeat_preserves_commit_dirty_work_and_modes(self):
         wt = self.prepare()
+        self.assertEqual(self.meta()["survey_doc"], "docs/current-state.md")
+        self.assertNotIn("survey_output_dir", self.meta())
+        self.assertFalse((wt / "docs/current-state").exists())
         self.document(wt)
         head = self.git("rev-parse", "HEAD", cwd=wt)
         (wt / "source.txt").write_text("unfinished work\n")
@@ -167,11 +170,61 @@ class SurveyTest(unittest.TestCase):
         self.assertEqual((wt / "source.txt").read_text(), "unfinished work\n")
         self.assertEqual(self.meta()["survey_publish"], "none")
         self.run_survey("prepare", "--publish", "direct", ok=False)
-        self.run_survey("prepare", "--output-dir", "elsewhere", ok=False)
+        self.run_survey("prepare", "--output-file", "elsewhere.md", ok=False)
         self.run_survey("prepare", "--pr-tool", "glab", ok=False)
         other = self.prepare(root="run-2")
         self.assertNotEqual(wt, other)
         self.assertNotEqual(self.meta()["survey_branch"], self.meta("run-2")["survey_branch"])
+
+    def test_custom_output_files_through_publish_and_cleanup(self):
+        for root, output in (("nested", "reports/nested/state.md"),
+                             ("top-level", "current-state.md")):
+            with self.subTest(output=output):
+                self.run_survey("prepare", "--output-file", output, "--publish", "direct", root=root)
+                saved = self.meta(root).copy()
+                self.assertEqual(saved["survey_doc"], output)
+                self.assertNotIn("survey_output_dir", saved)
+                wt = Path(saved["work_dir"])
+                self.run_survey("prepare", root=root)
+                self.run_survey("prepare", "--output-file", output, root=root)
+                self.assertEqual(self.meta(root), saved)
+                doc = self.document(wt, root)
+                self.assertEqual(doc, wt / output)
+                self.run_survey("publish", root=root)
+                self.assertIn("Actual source behavior.", self.git("show", f"main:{output}", cwd=self.origin))
+                self.scope_pass(root)
+                self.run_survey("cleanup", root=root)
+                self.assertFalse(wt.exists())
+
+    def test_persisted_legacy_handoffs_keep_paths_and_dirty_work(self):
+        for root, directory in (("legacy-default", "docs/current-state"),
+                                ("legacy-custom", "reports/old-survey")):
+            with self.subTest(directory=directory):
+                # This is also the command retained in an old cooked prepare step.
+                self.run_survey("prepare", "--output-dir", directory, "--publish", "direct", root=root)
+                self.meta(root, survey_output_dir=directory)
+                saved = self.meta(root).copy()
+                self.assertEqual(saved["survey_doc"], f"{directory}/README.md")
+                wt = Path(saved["work_dir"])
+                doc = wt / saved["survey_doc"]
+                doc.write_text("unfinished survey\n")
+                self.run_survey("prepare", root=root)
+                self.run_survey("prepare", "--output-dir", directory + "/", root=root)
+                self.run_survey("prepare", "--output-file", saved["survey_doc"], root=root)
+                self.run_survey("prepare", "--output-file", "docs/current-state.md", root=root, ok=False)
+                self.assertEqual(self.meta(root), saved)
+                self.assertEqual(doc.read_text(), "unfinished survey\n")
+                self.assertFalse((wt / "docs/current-state.md").exists())
+                self.meta(root, survey_doc="elsewhere.md")
+                self.run_survey("stamp", root=root, ok=False)
+                self.meta(root, **saved)
+                self.document(wt, root)
+                self.run_survey("publish", root=root)
+                self.scope_pass(root)
+                self.run_survey("cleanup", root=root)
+                self.assertFalse(wt.exists())
+                self.assertEqual(self.meta(root)["survey_doc"], saved["survey_doc"])
+                self.assertEqual(self.meta(root)["survey_output_dir"], directory)
 
     def test_stamp_and_none_publish(self):
         wt = self.prepare()
@@ -245,11 +298,18 @@ class SurveyTest(unittest.TestCase):
         self.assertTrue(wt.exists())
 
     def test_unsafe_output_paths_and_symlinks(self):
-        for output in ("/tmp/escape", "../escape", ".git", "docs/../escape", "", "docs//escape"):
+        for output in ("/tmp/escape", "../escape", ".git", "docs/../escape", "", "docs//escape",
+                       "docs/state.md/", "docs/state\n.md", "docs/state\r.md"):
             with self.subTest(output=output):
-                self.run_survey("prepare", "--output-dir", output, ok=False)
+                self.run_survey("prepare", "--output-file", output, ok=False)
+        self.run_survey("prepare", "--output-file", ok=False)
+        self.run_survey("prepare", "--output-file", "state.md", "--output-dir", "docs", ok=False)
+        self.run_survey("prepare", "--output-dir", "docs", "--output-file", "state.md", ok=False)
+        self.run_survey("prepare", "--output-dir", "", ok=False)
+        (self.repo / "directory.md").mkdir()
+        self.run_survey("prepare", "--output-file", "directory.md", ok=False)
         (self.repo / "escape").symlink_to(self.root, target_is_directory=True)
-        self.run_survey("prepare", "--output-dir", "escape", ok=False)
+        self.run_survey("prepare", "--output-file", "escape/state.md", ok=False)
         wt = self.prepare()
         doc = wt / self.meta()["survey_doc"]
         outside = self.root / "outside"

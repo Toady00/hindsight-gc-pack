@@ -4,7 +4,7 @@
 # Thin wrapper over assets/scripts/survey.sh so the surveyor's formula steps
 # and humans share one path: `gc <binding> survey <subcommand> <root-bead-id>`.
 #
-#   survey prepare <root> [--output-dir D] [--publish pr|direct|none] [--pr-tool auto|gh|glab]
+#   survey prepare <root> [--output-file FILE] [--publish pr|direct|none] [--pr-tool auto|gh|glab]
 #   survey show    <root>
 #   survey stamp   <root>
 #   survey publish <root> [--body-file F]

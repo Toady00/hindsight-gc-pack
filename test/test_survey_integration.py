@@ -59,7 +59,10 @@ class SurveyIntegrationTest(test_commands.GasCityCompatibilityTest):
         self.assertLess(survey.index("survey stamp"), survey.index("git commit -S"))
         self.assertEqual(len(re.findall(r"(?m)^ +git commit ", survey)), 1)
         self.assertIn('--only', survey)
-        self.assertIn('git add -- "{{output_dir}}/README.md"', survey)
+        self.assertIn('git add -- "$survey_doc"', survey)
+        self.assertIn('-- "$survey_doc"', survey.split("git commit -S", 1)[1])
+        self.assertIn("normally `{{output_file}}`", survey)
+        self.assertNotIn("{{output_dir}}", result.stdout)
         self.assertIn("scope-body bead", steps["cleanup"]["description"])
         deps = {(d["step_id"].split(".")[-1], d["depends_on_id"].split(".")[-1])
                 for d in recipe["deps"] if d["type"] == "blocks"}
@@ -88,10 +91,7 @@ class SurveyIntegrationTest(test_commands.GasCityCompatibilityTest):
         store = json.loads((rig_state / "beads.json").read_text())
         steps = {b.get("metadata", {}).get("gc.step_ref"): b for b in store["beads"]}
         prepare = steps["current-state-survey.prepare-worktree"]
-        # Installed gc accepts --var but loses overrides during order
-        # instantiation. Pin the observed behavior so docs cannot call this a
-        # local-only run. Revisit this assertion when upstream fixes dispatch.
-        self.assertIn('--publish "pr"', prepare["description"])
+        self.assertIn('--publish "none"', prepare["description"])
         self.assertNotIn("{{", prepare["description"])
         for name in ("prepare-worktree", "survey", "publish", "cleanup"):
             bead = steps["current-state-survey." + name]
@@ -101,19 +101,42 @@ class SurveyIntegrationTest(test_commands.GasCityCompatibilityTest):
         command = re.search(r"(?m)^ +(gc hindsight survey prepare .*)$", prepare["description"])[1]
         self.run_command("bash", "-eu", "-c", command.replace("<root>", result["wisp_id"]))
         self.assertEqual(self.calls()[-1]["args"], [
-            "prepare", result["wisp_id"], "--output-dir", "docs/current-state",
-            "--publish", "pr", "--pr-tool", "auto"])
+            "prepare", result["wisp_id"], "--output-file", "docs/current-state.md",
+            "--publish", "none", "--pr-tool", "auto"])
+
+    def test_order_defaults_to_new_file_and_pr_publication(self):
+        rig_state = self.root / "widgets/.gc"
+        rig_state.mkdir()
+        (rig_state / "beads.json").write_text('{"seq":0,"beads":[]}\n')
+        self.run_command(self.gc, "order", "run", "current-state-survey", "--rig", "widgets", "--json")
+        store = json.loads((rig_state / "beads.json").read_text())
+        prepare = next(b for b in store["beads"] if b.get("metadata", {}).get("gc.step_ref")
+                       == "current-state-survey.prepare-worktree")
+        self.assertIn('--output-file "docs/current-state.md"', prepare["description"])
+        self.assertIn('--publish "pr"', prepare["description"])
 
     def test_formula_cook_preserves_local_only_override(self):
         rig_state = self.root / "widgets/.gc"
         rig_state.mkdir()
         (rig_state / "beads.json").write_text('{"seq":0,"beads":[]}\n')
         self.run_command(self.gc, "formula", "cook", "current-state-survey", "--rig", "widgets",
-                         "--var", "publish=none", "--json")
+                         "--var", "publish=none", "--var", "output_file=reports/state.md", "--json")
         store = json.loads((rig_state / "beads.json").read_text())
         prepare = next(b for b in store["beads"] if b.get("metadata", {}).get("gc.step_ref")
                        == "current-state-survey.prepare-worktree")
         self.assertIn('--publish "none"', prepare["description"])
+        self.assertIn('--output-file "reports/state.md"', prepare["description"])
+        survey = next(b for b in store["beads"] if b.get("metadata", {}).get("gc.step_ref")
+                      == "current-state-survey.survey")
+        self.assertIn("normally `reports/state.md`", survey["description"])
+        self.assertNotIn("{{", survey["description"])
+        self.mock(self.pack / "assets/scripts/survey.sh")
+        command = re.search(r"(?m)^ +(gc hindsight survey prepare .*)$", prepare["description"])[1]
+        root = prepare["metadata"]["gc.root_bead_id"]
+        self.run_command("bash", "-eu", "-c", command.replace("<root>", root))
+        self.assertEqual(self.calls()[-1]["args"], [
+            "prepare", root, "--output-file", "reports/state.md",
+            "--publish", "none", "--pr-tool", "auto"])
         self.assertEqual(prepare["metadata"]["gc.routed_to"], "widgets/hindsight.surveyor")
         self.assertEqual(prepare["metadata"]["gc.root_store_ref"], "rig:widgets")
 

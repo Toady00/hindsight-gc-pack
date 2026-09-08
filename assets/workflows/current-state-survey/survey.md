@@ -3,11 +3,15 @@ Read `gc.root_bead_id` from this bead as `<root>`, then
 and confirm `pwd -P` matches before reading anything. Everything below
 happens inside that worktree; the rig root checkout is off limits.
 
-Survey the repository as it is at `HEAD` of the worktree and write
-`survey_doc` (`{{output_dir}}/README.md`) — the whole document, replaced
-each run. It is the repository's current-state record: what the code does
+Survey the repository as it is at `HEAD` of the worktree. Write the whole
+document to the saved `survey_doc` path, normally `{{output_file}}`, replacing
+it each run. It is the repository's current-state record: what the code does
 today, for a reader who has never opened it. Start the file with a top-level
 heading; leave frontmatter out. The stamp command adds it before committing.
+Set the shell variable `survey_doc` to the exact value printed by `survey show`.
+Use that saved path throughout, including for active runs at the old
+`docs/current-state/README.md` path. Do not move an active run's document or
+source the handoff output as shell code.
 
 Contents, in this order:
 
@@ -41,9 +45,9 @@ Then, still in the worktree:
    unstage, reset, or commit someone else's changes. Commit only the stamped
    document, in one explicitly signed commit:
 
-       git add -- "{{output_dir}}/README.md"
+       git add -- "$survey_doc"
        git diff --cached --check
-       git commit -S --only -m "docs: current-state survey of $GC_RIG ($(date -u +%Y-%m-%d))" -- "{{output_dir}}/README.md"
+       git commit -S --only -m "docs: current-state survey of $GC_RIG ($(date -u +%Y-%m-%d))" -- "$survey_doc"
 
    A signing failure is a failed step. Do not retry unsigned or bypass hooks.
 

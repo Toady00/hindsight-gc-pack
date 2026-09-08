@@ -5,7 +5,7 @@ edit anything in the rig root checkout.
    hard-fail if it is missing.
 2. Run the pack's survey command:
 
-       gc hindsight survey prepare <root> --output-dir "{{output_dir}}" --publish "{{publish}}" --pr-tool "{{pr_tool}}"
+       gc hindsight survey prepare <root> --output-file "{{output_file}}" --publish "{{publish}}" --pr-tool "{{pr_tool}}"
 
    (`hindsight` is the pack's import binding; use the city's binding name
    if it differs.) It fetches the remote default branch, creates the

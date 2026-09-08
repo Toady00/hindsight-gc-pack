@@ -9,7 +9,7 @@ the cleanup — is this command.
 ## Usage
 
 ```
-survey prepare <root> [--output-dir <dir>] [--publish pr|direct|none] [--pr-tool auto|gh|glab]
+survey prepare <root> [--output-file <file>] [--publish pr|direct|none] [--pr-tool auto|gh|glab]
 survey show    <root>
 survey stamp   <root>
 survey publish <root> [--body-file <file>]
@@ -23,7 +23,7 @@ handoff state lives in its metadata (`survey show` prints it).
   `<city>/.gc/worktrees/<rig>/current-state-<root>` on branch
   `survey/current-state-<root>`. Persist the base commit, ownership and
   options before creation. Retries preserve existing commits and dirty work;
-  conflicting options are refused. Defaults: `docs/current-state`, `pr`, `auto`.
+  conflicting options are refused. Defaults: `docs/current-state.md`, `pr`, `auto`.
 - `stamp` — write the `current-state` frontmatter (`id:
   current-state.<rig>`, `status: draft`, `source: agent`, `updated_at:` now)
   over the document, replacing any existing
@@ -43,14 +43,23 @@ handoff state lives in its metadata (`survey show` prints it).
   `--force` explicitly discards the owned worktree, including uncommitted work.
   Run cleanup from outside the worktree. Interrupted removal can be retried.
 
+The formula variable `output_file` and `prepare --output-file` take a full
+rig-relative file path, not a directory. Parent directories are created as
+needed. `survey_doc` is the saved path used by stamp, publish, and cleanup.
+Retries without output options keep that path, including active surveys at
+`docs/current-state/README.md`. The legacy `--output-dir <dir>` flag remains
+for already-cooked workflows and means `<dir>/README.md`; it cannot be combined
+with `--output-file`. Legacy `survey_output_dir` metadata is checked but never
+rewritten. Start a new root to change an active survey's output path.
+
 ## When to reach for it
 
 - Running a survey by hand: `gc order run current-state-survey --rig
   <rig>` fires the whole workflow with PR publication defaults.
 - First live test without publication: `gc formula cook current-state-survey
   --rig <rig> --var publish=none --json`. This creates real work, not a read-only
-  dry run. Do not start another survey while one is active. The installed
-  `order run --var` silently loses overrides, so use `formula cook` for options.
+  dry run. Do not start another survey while one is active. Verify the persisted
+  prepare step's options; older `order run --var` builds silently lost overrides.
 - A run was preserved (failed, or `--publish none`): inspect the worktree
   `gc hindsight survey show <root>` names. Keep it until review is complete;
   `gc hindsight survey cleanup <root> --force` discards it explicitly.
