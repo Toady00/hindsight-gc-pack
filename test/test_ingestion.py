@@ -852,6 +852,60 @@ class HTTPTest(unittest.TestCase):
             with patch.object(self.api, "request", return_value=value), self.assertRaises(ingestion.Error):
                 self.api.drain(30)
 
+    def test_drain_timeout_reports_background_work_without_claiming_stuck_document(self):
+        pages = [{"total": 8, "operations": [dict(id="refresh-op", task_type="refresh_mental_model", status="pending")]},
+                 {"total": 1, "operations": [dict(id="consolidate-op", task_type="consolidation", status="processing")]}]
+        with patch.object(self.api, "request", side_effect=pages) as request, \
+                patch.object(ingestion, "_pause", side_effect=ingestion.Error("active operation timeout; durable attempt retained", 3)), \
+                self.assertRaises(ingestion.Error) as caught:
+            self.api.drain(30)
+        message = str(caught.exception)
+        self.assertEqual(caught.exception.code, 3)
+        for text in ("bank drain timeout", "last observed", "refresh-op", "refresh_mental_model",
+                     "consolidate-op", "consolidation", "document receipts are unchanged", "do not repeat --reprocess"):
+            self.assertIn(text, message)
+        self.assertNotIn("durable attempt retained", message)
+        observed = json.loads(message.split("per status): ", 1)[1].split("; document receipts", 1)[0])
+        self.assertEqual(observed["pending"]["total"], 8)
+        self.assertEqual(observed["processing"]["total"], 1)
+        self.assertEqual(request.call_count, 2)
+        self.assertIsNone(self.api.deadline)
+
+    def test_drain_timeout_during_listing_keeps_partial_diagnostics(self):
+        for pages in ([ingestion.Error("HTTP wait expired", 3)],
+                      [{"total": 0, "operations": []}, ingestion.Error("HTTP wait expired", 3)]):
+            with self.subTest(pages=pages), patch.object(self.api, "request", side_effect=pages), \
+                    self.assertRaises(ingestion.Error) as caught:
+                self.api.drain(30)
+            self.assertEqual(caught.exception.code, 3)
+            self.assertIn("bank readiness unconfirmed", str(caught.exception))
+            self.assertNotIn("durable attempt retained", str(caught.exception))
+            self.assertIsNone(self.api.deadline)
+
+    def test_drain_does_not_relabel_non_timeout_errors(self):
+        with patch.object(self.api, "request", side_effect=ingestion.Error("unavailable", 5)), \
+                self.assertRaises(ingestion.Error) as caught:
+            self.api.drain(30)
+        self.assertEqual(caught.exception.code, 5)
+        self.assertEqual(str(caught.exception), "unavailable")
+
+    def test_drain_classifies_actual_request_failures_at_deadline(self):
+        for returncode, finished, code in ((22, 105, 5), (28, 105, 3), (28, 101, 5)):
+            with self.subTest(returncode=returncode, finished=finished), \
+                    patch.object(ingestion.time, "monotonic", side_effect=[100, 100, finished]), \
+                    patch.object(ingestion.subprocess, "run", return_value=subprocess.CompletedProcess([], returncode, "", "")), \
+                    self.assertRaises(ingestion.Error) as caught:
+                self.api.drain(5)
+            self.assertEqual(caught.exception.code, code)
+            self.assertEqual("bank drain timeout" in str(caught.exception), code == 3)
+            self.assertIsNone(self.api.deadline)
+        with patch.object(ingestion.time, "monotonic", return_value=100), \
+                patch.object(ingestion.subprocess, "run") as run, self.assertRaises(ingestion.Error) as caught:
+            self.api.drain(0)
+        self.assertEqual(caught.exception.code, 3)
+        self.assertIn("bank readiness unconfirmed", str(caught.exception))
+        run.assert_not_called()
+
     def test_inventory_pages_and_ids(self):
         with patch.object(self.api, "request", side_effect=[
                 {"items": [{"id": "a"}], "total": 2}, {"items": [{"id": "b"}], "total": 2}]) as request:

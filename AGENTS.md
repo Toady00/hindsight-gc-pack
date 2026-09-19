@@ -1,5 +1,91 @@
 # Review Pitfalls
 
+- On 2026-09-19, `lv-dblx` was closed as blocked after repeated drain timeouts,
+  but all five selected ingestion documents had successful reprocess receipts
+  and completed child operations with zero extraction errors. `API.drain()`
+  waits for all pending/processing bank operations, including consolidation and
+  mental-model refreshes. Its generic "durable attempt retained" timeout does
+  not establish a stuck document attempt. Check per-document receipts and live
+  operation details before repeating `--reprocess`; later zero-shipped timeout
+  scans do not negate earlier completed work. Consolidation completed at
+  03:55:29 UTC, followed by mental-model refreshes; bank health still reflected
+  the latest incomplete scan.
+
+- Current Gas City compiles `phase = "vapor"` formulas without `pour = true`
+  into root-only wisps even when they declare steps. Ship and maintenance need
+  `pour = true`: their executable commands live in child descriptions. Test
+  `gc formula show --json` for real compiled children and dependencies, not just
+  TOML step descriptions. Editing a formula does not expand already-cooked runs.
+  Run `lv-dblx` exposed this on 2026-09-19; inspect its status before resubmitting
+  any reprocess request, since the archivist may recover it from saved metadata.
+
+- On 2026-09-18, all 11 live `stacked-chips-v2` document records lacked
+  `retain_params.strategy`, and the bank had no `retain_default_strategy`.
+  Upstream v0.10.0 document reprocess replays stored params and forces extraction,
+  but cannot recover an absent original strategy; UI reprocess would therefore
+  use generic bank settings. Prefer reviewed `gc hindsight ship --reprocess`
+  for Git-managed docs when restoring document-type parameters matters. It
+  reads current published Git content, not necessarily the previously retained
+  revision, and excludes bank-native records. Preview before running.
+
+- Upstream v0.10.0 startup calls `load_dotenv_for_entrypoint()`, which uses
+  `load_dotenv(find_dotenv(usecwd=True), override=True)`: a discovered `.env`
+  can override container/process environment values. Configuration is cached
+  per process. Set `HINDSIGHT_API_LLM_OUTPUT_LANGUAGE=English` on API and any
+  separate workers and restart those processes; check for conflicting `.env`
+  values. An isolated check against the actual config loader and consolidation
+  prompt builder confirmed this variable resolves to English and replaces the
+  source-language rule with the forced-English instruction. Bank config GET
+  excludes this static field, so its absence there does not show it is unset.
+
+- Source investigation at upstream v0.10.0 (`5d46f9c8`) confirmed built-in
+  source-language rules in retain/fact_extraction.py and consolidation/prompts.py.
+  Do not infer missing language instructions from bank missions alone. Directives
+  apply to reflect, including reflect-based mental-model refresh, not retain or
+  observation consolidation. `HINDSIGHT_API_LLM_OUTPUT_LANGUAGE` is the documented
+  server-level control; it is absent from bank-configurable fields and remains
+  prompt guidance, not output validation. Consolidation's separate dedup prompt
+  omits both language rules, but was not the origin of the French update below.
+- The live `/v1/default/banks/{bank}/llm-requests` traces on 2026-09-18 showed:
+  retain request `c12554b4-19a0-482d-bb15-06e05cf1222b` received an English HLD
+  chunk and the explicit no-translation rule, yet emitted eight Spanish facts.
+  PRD retain request `0cbf2cac-b229-4e9d-9cd8-47626726f4a7` emitted French facts.
+  Consolidation request `dacdcd50-bcbe-4108-bda7-212f9072ca02` received six English
+  and two French new facts plus the per-observation source-language rule, then
+  emitted three creates and six updates in French, including observation
+  `8bd9d25b-c53f-42a1-81a7-7fbce9d66ff6`. These calls reported `gpt-5.6-luna`
+  through `openai-responses`. The consolidation input trace was truncated, but
+  retained the complete system prompt and new-facts section. Trace memory-ID
+  filters return whole related operation runs, not just the responsible call;
+  inspect actual outputs. Default trace retention is one day. This evidence
+  supports model language drift and mixed-language batch spillover, not a missing
+  bank mission requirement or a proven dedup cause.
+
+- Language drift also occurs during extraction, not only consolidation:
+  observation `989dfd33-d6fb-432d-863d-3562c9f5dfcf` is Spanish and derives from
+  Spanish world fact `a175ae41-b4e4-48d0-a802-b7725e894bb0`. The retained original
+  text of `hld.ingestion.initial-ingestion.0001` is English. Verified via the
+  live API on 2026-09-18. Audit world facts as well as observations; rebuilding
+  observations alone leaves incorrectly translated extracted facts in place.
+
+- Hindsight v0.10.0 memory GET returns a deprecated, always-empty `history`
+  field. Read `/v1/default/banks/{bank}/memories/{id}/history` for observation
+  changes and resolved source facts. On 2026-09-18, observation
+  `8bd9d25b-c53f-42a1-81a7-7fbce9d66ff6` in `stacked-chips-v2` changed from
+  English to French during consolidation of English source facts. The live
+  observations mission had no explicit output-language requirement. Check
+  stored text, source facts, and history before blaming UI translation.
+  A subsequent random sample of 20 other observations from all 446 found
+  3 French and 17 English; the French entries were updated around
+  04:36-04:37 UTC that day. This does not establish a configured language
+  preference or the total number affected.
+- The v0.10.0 `DELETE /memories/{memory_id}/observations` endpoint clears all
+  observations derived from a source memory and automatically queues
+  consolidation. It is not an observation-ID-only regeneration endpoint.
+  Inspect shared source links before using it: the PRD source for the French
+  observation above also supports an English observation. A normal bank
+  consolidation trigger only processes unconsolidated memories.
+
 - Existing uncommitted files include protected reference documents and survey
   work. Do not edit, remove, stage, or commit them without the user's approval.
 - The old 42-test suite and `gc lint .` passed despite broken prompt paths.

@@ -22,7 +22,7 @@ sys.path.insert(0, str(SCRIPTS))
 import ship_docs
 import ship_report
 import connection
-from ingestion import Error, _payload_hash
+from ingestion import API, Error, _payload_hash
 
 
 def load_module(name, path):
@@ -263,6 +263,36 @@ class ShipCLITest(unittest.TestCase):
             self.assertEqual(ship_docs.main(), 0)
         self.assertIn("UNCHANGED", out.getvalue())
         self.store.put.assert_not_called()
+
+    def test_later_bank_timeout_preserves_completed_documents_and_full_scan_receipt(self):
+        self.ship("--full-scan")
+        success = self.store.get("bank")["last_success"]
+        document = dict(document_id="spec.fixture", attempt=dict(state="succeeded", source_hash="hash"),
+                        last_success=dict(source_hash="hash", completed_at=success["finished_at"],
+                                          reprocess_operation_id="completed-reprocess"))
+        self.store.put("document", "spec.fixture", document)
+        self.store.list_documents.return_value = [document]
+        self.ingestor.reset_mock()
+        self.api.drain.side_effect = API("https://fixture.invalid", "fixture").drain
+        with patch.object(API, "request", side_effect=Error("deadline expired", 3)):
+            report = self.ship("--reprocess", code=3)
+        self.assertIn("bank drain timeout", report["error"])
+        self.assertEqual(report["status"], "incomplete")
+        self.assertEqual(report["counts"]["shipped"], 0)
+        self.assertEqual(report["counts"]["failed"], 0)
+        self.assertEqual(self.store.get("document", "spec.fixture"), document)
+        self.assertEqual(self.store.get("bank")["last_success"], success)
+        self.assertEqual(self.ingestor.mock_calls, [])
+        health = ship_report.status(self.store)
+        self.assertFalse(health["healthy"])
+        self.assertEqual(health["unresolved_documents"], [])
+
+    def test_shipping_does_not_wait_for_background_work_after_document_completion(self):
+        self.api.drain.side_effect = [None, Error("background consolidation still processing", 3)]
+        report = self.ship("--reprocess")
+        self.api.drain.assert_called_once_with(300)
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["counts"]["shipped"], 1)
 
     def test_recovery_precedes_inventory_and_force_only_suppresses_matching_reprocess(self):
         item, digest, _ = ship_docs.item_from(DOCUMENT, schema.validate(FIELDS))

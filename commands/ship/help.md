@@ -76,7 +76,18 @@ it first. It retains current source and parameters, waits, calls the server's
 document reprocess endpoint and waits again. This requests reprocessing; it is
 not a verified guarantee of server-side unchanged-chunk invalidation.
 
-That endpoint is not caller-idempotent. The shipper records phase
+`--drain-timeout` defaults to 300 seconds and controls the bank-wide wait before
+shipping. It includes consolidation and mental-model refreshes, not just retain
+operations. A bank drain timeout reports the last observed counts and one sample
+operation per status; those samples may be stale, so inspect live operation
+details for progress. An incomplete scan does not invalidate successful document
+receipts. Check `gc hindsight status` and the selected documents' city-store
+`last_success` receipts before retrying. Do not repeat `--reprocess` solely because
+background work exceeded this wait. After it settles, an ordinary scan can
+reconcile health without forcing extraction again. Document extraction completion
+is checked separately; a successful ship does not promise that the bank is idle.
+
+The document reprocess endpoint is not caller-idempotent. The shipper records phase
 `reprocess_prepared` before calling it. A lost acknowledgement fails closed:
 never blindly retry the POST or clear the attempt. A human must identify the
 actual operation in the bank's operation list and repair

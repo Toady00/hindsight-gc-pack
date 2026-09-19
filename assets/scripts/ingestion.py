@@ -259,7 +259,8 @@ class API:
             except (OSError, UnicodeError):
                 raise Error("cannot execute Hindsight HTTP client") from None
             if response.returncode:
-                code = 3 if self.deadline is not None and time.monotonic() >= self.deadline else 5
+                code = (3 if response.returncode == 28 and self.deadline is not None
+                        and time.monotonic() >= self.deadline else 5)
                 raise Error("Hindsight HTTP request failed; outcome unknown", code)
             try:
                 value = json.loads(response.stdout)
@@ -294,20 +295,33 @@ class API:
         return result
 
     def drain(self, timeout):
-        with _budget(self, timeout) as deadline:
-            while True:
-                total = 0
-                for status in ("pending", "processing"):
-                    result = self.request("GET", "operations?status=" + status + "&limit=1")
-                    count, rows = result.get("total"), result.get("operations")
-                    if (type(count) is not int or count < 0 or not isinstance(rows, list)
-                            or len(rows) > 1 or len(rows) > count or (count > 0 and not rows)
-                            or any(not isinstance(row, dict) or row.get("status") != status for row in rows)):
-                        raise Error("invalid filtered Hindsight operation list")
-                    total += count
-                if not total:
-                    return
-                _pause(deadline)
+        observed = {}
+        try:
+            with _budget(self, timeout) as deadline:
+                while True:
+                    total = 0
+                    for status in ("pending", "processing"):
+                        result = self.request("GET", "operations?status=" + status + "&limit=1")
+                        count, rows = result.get("total"), result.get("operations")
+                        if (type(count) is not int or count < 0 or not isinstance(rows, list)
+                                or len(rows) > 1 or len(rows) > count or (count > 0 and not rows)
+                                or any(not isinstance(row, dict) or row.get("status") != status for row in rows)):
+                            raise Error("invalid filtered Hindsight operation list")
+                        observed[status] = dict(total=count, sample=[
+                            {key: row[key] for key in ("id", "task_type", "status") if key in row}
+                            for row in rows])
+                        total += count
+                    if not total:
+                        return
+                    _pause(deadline)
+        except Error as error:
+            if error.code != 3:
+                raise
+            # A bank-wide wait says nothing about any individual document receipt.
+            raise Error("bank drain timeout; bank readiness unconfirmed; "
+                        "last observed operations (one sample per status): " + _json(observed) +
+                        "; document receipts are unchanged. Inspect receipts and live operation details "
+                        "before retrying; do not repeat --reprocess solely because this wait timed out", 3) from error
 
     def inventory(self):
         documents, seen, expected = [], set(), None

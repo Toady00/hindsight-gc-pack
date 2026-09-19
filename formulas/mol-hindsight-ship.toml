@@ -31,6 +31,7 @@ local --dry-run previews. This workflow runs real shipping requests.
 formula = "mol-hindsight-ship"
 version = "0.1.0"
 phase = "vapor"
+pour = true
 
 [vars]
 
@@ -71,7 +72,11 @@ to delete bank content. Do not edit docs to force them through; a refusal is
 a finding. Pushed drafts are visible; no accepted-source filters are added.
 
 For --reprocess, retain completes before the server document reprocess call.
-That endpoint is not caller-idempotent. A lost acknowledgement leaves phase
+On exit 3, inspect receipts and live operation details before retrying: a bank
+drain can time out on consolidation or mental-model refreshes after earlier
+document work succeeded. Do not repeat --reprocess solely because of that wait;
+follow the report step's receipt checks even if this step cannot complete.
+The reprocess endpoint is not caller-idempotent. A lost acknowledgement leaves phase
 reprocess_prepared and fails closed. Never blindly retry the POST or clear the
 attempt. A human must inspect the operation list and repair
 metadata.hindsight.data.attempt.reprocess_operation_id with the actual UUID and
@@ -95,6 +100,16 @@ health bead ID printed by the shipper and whether this was a full or partial
 scan. gc hindsight status reads shared Beads, not the live bank, and reports
 freshness and unresolved attempts. Partial scans cannot refresh the full-scan
 success timestamp; incomplete partial runs still make health unhealthy.
+For exit 3, distinguish a bank drain timeout from a document-operation timeout.
+A bank drain waits for all pending/processing operations, including consolidation
+and mental-model refreshes; it does not establish a stuck document attempt.
+Inspect the selected documents' last_success receipts and attempt states in the
+city store, then fetch live operation details and extraction child results.
+Report confirmed document completion separately from background bank readiness.
+A later zero-shipped timeout scan does not negate earlier successful receipts.
+Do not repeat --reprocess for documents with confirmed reprocess receipts merely
+because the bank drain timed out. Use an ordinary scan to reconcile health after
+background work settles. Never clear a durable attempt to bypass a timeout.
 Escalate incomplete roots, failed fetches, GONE findings, and any stale full-scan
 health alongside refusals and failures. Exit 5 means the run could not establish
 complete state, including operation-list or inventory failures. A clean run

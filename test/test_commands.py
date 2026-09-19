@@ -154,7 +154,7 @@ class GasCityCompatibilityTest(CommandFixture):
         # config and site paths directly. NEVER gc init/start or use --hook.
         for name in ("home", "gc-home", ".gc", "widgets"):
             (self.root / name).mkdir()
-        for name in ("pack.toml", "agents", "template-fragments"):
+        for name in ("pack.toml", "agents", "template-fragments", "formulas"):
             source = PACK / name
             if source.is_dir():
                 shutil.copytree(source, self.pack / name)
@@ -234,6 +234,31 @@ class GasCityCompatibilityTest(CommandFixture):
         self.assertIn("# Fixture reader", prompt)
         self.assertNotIn("gc hindsight read", prompt)
         self.assertNotIn("gc mail send", prompt)
+
+    def test_vapor_formulas_materialize_their_executable_steps(self):
+        for name in ("mol-hindsight-ship", "mol-hindsight-consolidate"):
+            with self.subTest(formula=name):
+                source = tomllib.loads((PACK / "formulas" / f"{name}.toml").read_text())
+                args = [self.gc, "--city", str(self.root), "formula", "show", name, "--json"]
+                if name == "mol-hindsight-ship":
+                    args += ["--var", "request=fixture-request"]
+                compiled = json.loads(self.run_command(*args).stdout)
+                self.assertTrue(compiled["pour"])
+                steps = {step["id"]: step for step in compiled["steps"]}
+                self.assertEqual(set(steps), {name} | {f"{name}.{s['id']}" for s in source["steps"]})
+                for step in source["steps"]:
+                    for dependency in step.get("needs", []):
+                        self.assertIn(dict(step_id=f"{name}.{step['id']}",
+                                           depends_on_id=f"{name}.{dependency}", type="blocks"),
+                                      compiled["deps"])
+                if name == "mol-hindsight-ship":
+                    self.assertIn("gc hindsight ship --request 'fixture-request'",
+                                  steps[f"{name}.ship-sync"]["description"])
+                    report = steps[f"{name}.report"]["description"]
+                    for text in ("last_success receipts", "extraction child results",
+                                 "Report confirmed document completion separately",
+                                 "Do not repeat --reprocess", "ordinary scan"):
+                        self.assertIn(text, report)
 
     def test_formula_commands_dispatch_and_preserve_requests_and_failures(self):
         formula = tomllib.loads((PACK / "formulas/mol-hindsight-ship.toml").read_text())
