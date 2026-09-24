@@ -38,7 +38,10 @@ The archivist runs one write script at a time in the foreground. Its agent
 configuration supplies `HINDSIGHT_WRITER=archivist`; the scripts also require a
 managed session ID. This is an accidental-bypass guard, not credential-based
 access control. Do not export the marker in workspace-wide env or give it to
-other agents. There is no shared lock. Keep exactly one active writer per bank;
+other agents. A city-local advisory lock prevents overlapping ship processes,
+including surviving tools from an old session. It is not a distributed lock
+and does not serialize arbitrary external clients. Keep exactly one active writer
+per bank;
 multiple cities writing the same bank are unsupported.
 
 Endpoint precedence is explicit `--api`, then `HINDSIGHT_API`, then
@@ -58,6 +61,78 @@ and health reports contain no credentials. For standalone read calls, use
 Runtime dependencies are Bash, Git, curl with `--fail-with-body`, jq, Mike
 Farah's yq, Python 3.11 or newer, Hindsight CLI, and Gas City. Python's standard
 library handles connection files, validation, request encoding and reports.
+
+## Archivist workflow dispatch
+
+The archivist uses `wake_mode = "resume"`. In gc `4eb766c0b`, fresh mode can
+cycle a live session on the next controller tick after it claims another bead,
+even if that bead's foreground shipping command has begun. Resume mode avoids
+that deliberate claim-transition reset; explicit operator resets remain possible.
+After closing a root, the worker checks the hook again before going idle.
+
+Shipping attributes each attempt and confirmed receipt to the canonical claim
+on the session bead. `gc hindsight status --task <root-id>` returns those receipt
+summaries plus recent scan snapshots. A reset followed by a zero-write drain
+timeout therefore leaves earlier successes visible. Bank health is still
+reported independently, and an interrupted scan is not promoted to success.
+An ordinary retry skips matching confirmed receipts. Re-entering the same
+task's force request also skips an already confirmed matching reprocess; a
+separate task's explicit force request still runs.
+
+Shipping and maintenance use root-only vapor tasks. Their root descriptions
+contain the entire ordered workflow, including failure handling, report notes,
+and root closure. Shipping runs sync then reporting. Maintenance runs the script,
+audits mental models only after exit 0 or 2, then reports even if earlier work
+was incomplete. There are no child beads to claim or resume independently.
+
+With gc `4eb766c0b`, `pour = true` creates legacy molecule roots and step children
+that controller Ready/demand intentionally excludes. `bd ready` displaying a
+child is not evidence that an on-demand worker will wake. Do not remove those
+upstream exclusions, and do not remove `pour` while leaving work only in child
+descriptions. In a new city, template-routed work can wake an ephemeral demand
+worker; an existing named identity can instead resume. Keep the archivist's capacity at
+one. Close work as its confirmed assignee rather than forcing ownership.
+
+### Recovering already-stranded runs
+
+Formula edits do not retrofit existing beads. Before changing live runs, inspect
+their root and all children, assignments, notes, outstanding bank operations,
+and document `attempt` / `last_success` receipts. Agree on the recovery plan with
+the operator. Never infer failed extraction from a bank-drain timeout alone.
+
+The September 22 read-only inspection in `las-vegas` found scheduled roots
+`lv-mt9e` (shipping) and `lv-c5ga` (maintenance) still open and unassigned, with
+legacy children. The archivist was asleep. All five September 19 ingestion
+reprocess receipts remained successful, no document attempts were unresolved,
+and the bank reported zero pending or processing operations. The health record
+still reflected the September 19 incomplete scan; it did not negate the receipts.
+
+Recovery procedure, only after approval and another state check:
+
+1. Record the old roots, child states, and receipt evidence in their notes.
+2. Retire the unstarted legacy children and roots as superseded by the corrected
+   workflow, not as executed successfully. Keep their history; do not delete or
+   rewrite document receipts. If anything is now claimed, stop and coordinate
+   with its owner instead of forcing closure.
+3. Let the scheduler create one replacement shipping run and one maintenance
+   run, or dispatch them deliberately while avoiding duplicate scheduled work.
+   Open old roots suppress replacement order runs.
+4. Use ordinary shipping, not `--reprocess`: confirmed extraction does not need
+   repeating. A normal scan will still ingest any genuinely changed published
+   documents. Verify demand, claim, notes, root closure, and bank health.
+
+The unsplit-city route-recovery warning about storage migration is separate;
+storage migration is not part of this repair.
+
+This recovery was approved and performed on September 23 UTC. Legacy children
+were retired as superseded, and Beads auto-closed their roots. Recovery notes,
+labels, and metadata distinguish that retirement from successful execution.
+Replacement maintenance `lv-dq60` completed cleanly. The initial replacement
+shipping run `lv-f93v` encountered the session-continuation and reporting issues
+addressed above. By September 24 at 00:50:24 UTC, ordinary scan `lv-amu7` had
+completed successfully with all 11 published documents unchanged, zero failures,
+and healthy bank status. The four most recent shipping roots were closed with
+reports, and there were no unresolved document attempts.
 
 Before retaining documents, the shipper checks `/openapi.json`. The server's
 `RetainRequest` schema must advertise client-supplied `operation_id` and boolean
@@ -200,3 +275,16 @@ gc lint .
 The tests invoke production scripts with temporary Git repositories and mocked
 Hindsight, curl and gc processes. They never write to a live bank. See
 [test/README.md](test/README.md) for the separate, optional live evaluation.
+
+The opt-in [archivist runtime regression](test/ARCHIVIST_RUNTIME.md) uses the
+installed controller, subprocess sessions, and an isolated Beads/Dolt database:
+
+```bash
+HINDSIGHT_RUNTIME_TEST=1 python3 -B -m unittest test.test_archivist_runtime -v
+```
+
+It verifies instantiated eligibility, controller demand, on-demand wake, hook
+claim, ordered execution through pack wrappers, report persistence, and root
+closure for both workflows. Hindsight and the model provider are mocked; no live
+city or bank is used. A legacy-pour negative control checks that `bd ready` alone
+does not imply controller eligibility.

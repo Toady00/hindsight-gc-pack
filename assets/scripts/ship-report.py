@@ -9,9 +9,9 @@ from ship_report import status
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) != 4 or sys.argv[1] != "status":
-            raise Error("usage: ship-report.py status <api> <bank>", 2)
-        report = status(BeadsStore(sys.argv[2], sys.argv[3]))
+        if len(sys.argv) not in (4, 5) or sys.argv[1] != "status":
+            raise Error("usage: ship-report.py status <api> <bank> [work-id]", 2)
+        report = status(BeadsStore(sys.argv[2], sys.argv[3]), sys.argv[4] if len(sys.argv) == 5 else "")
         print(json.dumps(report, indent=2))
         sys.exit(0 if report["healthy"] else 1)
     except (Error, ValueError, OSError) as error:

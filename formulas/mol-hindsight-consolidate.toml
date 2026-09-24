@@ -15,22 +15,14 @@ is what no server-side process does — the audits (tag hygiene, config
 drift, mental-model overreach) — plus an ensure-and-wait consolidation
 pass that gives the audits a settled corpus and catches anything
 auto-consolidation missed (e.g. after it was suspended for a bulk load).
-"""
-formula = "mol-hindsight-consolidate"
-version = "0.1.0"
-phase = "vapor"
-pour = true
 
-[vars]
+This root is the complete executable task; there are no child step beads.
+Execute the phases below in order, in one claimed archivist session. On a
+maintenance failure, skip the model audit but always report the outcome before
+closing the root. Do not abandon the report when a command exits nonzero.
 
-[vars.audit_models]
-description = "Space-separated mental model ids to spot-audit this run (rotate over time)"
-default = "conventions-and-standards landmines"
+## 1. Maintain
 
-[[steps]]
-id = "maintain"
-title = "Run deterministic maintenance"
-description = """
 Run the maintenance script and capture its report in the bead notes:
 
     gc hindsight maintain
@@ -50,7 +42,7 @@ re-derive its steps by hand:
   never by editing memories. CONFIG-DRIFT or AUDIT-INCOMPLETE requires operator attention. NEW-DOMAIN alone may be legitimate vocabulary
   growth — judge before escalating.
 - 3: drain timeout — operations still in flight; consolidation was not
-  run. Note it in the bead and stop (the next nightly run will catch up);
+  run. Stop maintenance and proceed to the report (the next nightly run will catch up);
   mail the mayor only if this is the second consecutive timeout.
   Inspect the reported operation IDs and live progress before describing work
   as stuck. Bank-wide waiting does not invalidate successful document receipts
@@ -59,14 +51,10 @@ re-derive its steps by hand:
   the failure and mail the mayor; never report this as a clean night.
 - 4: consolidation failed after recover+retry. Mail the mayor with the
   error output. Do not loop.
-"""
 
-[[steps]]
-id = "model-audit"
-title = "Spot-audit mental models"
-needs = ["maintain"]
-description = """
-Skip this step unless maintain exited 0 or 2 (consolidation actually ran).
+## 2. Model audit
+
+Skip this phase unless maintain exited 0 or 2 (consolidation actually ran).
 
 Create a scratch dir (`TMP=$(mktemp -d)`) — every API response lands under
 it, reaped on reboot, never dumped raw into your context. For each id in
@@ -78,15 +66,28 @@ establishes. Flag claims that name decisions, dates, or reaffirmations no
 document made, or that promote a draft/voice-memo position to platform
 fact. You are reading for overreach, not completeness. Mail the mayor only
 if a model asserts something materially wrong.
-"""
 
-[[steps]]
-id = "report"
-title = "Close out"
-needs = ["model-audit"]
-description = """
+## 3. Report
+
 Write a terse summary to bead notes: the script's final status line
 (drain/consolidate/audit_findings), and the model audit result (clean /
-findings). Mail the mayor only when something needs a human or coordinator
+findings / skipped because maintenance failed). Mail the mayor only when something needs a human or coordinator
 decision. A clean night closes silently.
+Write the report to this root's notes before closing this root. If maintenance
+or the model audit was incomplete, record that explicitly in both notes and the
+close reason; closing the workflow does not declare the bank healthy.
+Close as the claimed root's confirmed assignee using --actor, never --force.
+After closing, run gc hook --claim --json and execute any next claimed task;
+go idle only when no work is returned. Do not wait for an external reminder.
 """
+formula = "mol-hindsight-consolidate"
+version = "0.2.0"
+phase = "vapor"
+
+# Legacy poured children are excluded from controller demand. Keep all phases
+# in this task root so queued work can wake and be claimed by the archivist.
+[vars]
+
+[vars.audit_models]
+description = "Space-separated mental model ids to spot-audit this run (rotate over time)"
+default = "conventions-and-standards landmines"

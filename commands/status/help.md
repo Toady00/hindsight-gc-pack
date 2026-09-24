@@ -5,7 +5,17 @@ successful full-scan timestamp, freshness and unresolved document attempts as
 JSON. This command reads shared city Beads records; it does not call the live
 bank or wake an agent.
 
-`gc hindsight status [--bank <id>] [--api <url>]`
+`gc hindsight status [--bank <id>] [--api <url>] [--task <root-id>]`
+
+`document_receipts` lists the latest confirmed success per document, including
+operation IDs and task attribution when recorded. `recent_scans` contains up to
+20 prior scan snapshots plus the latest. `--task` filters these two evidence
+lists by claimed root ID; bank health and unresolved attempts remain bank-wide.
+Do not equate a latest scan's zero shipped count with no earlier successful
+writes. Receipts survive interrupted scans and session resets. Older receipts
+without task attribution remain visible without `--task`; they cannot be
+assigned retrospectively to a particular task. This is current receipt evidence,
+not an unlimited historical audit log.
 
 Exit 0 requires a successful full scan within `HINDSIGHT_MAX_SHIP_AGE` seconds,
 default 7200, clean `latest_full_scan` and `latest_run`, and no unresolved

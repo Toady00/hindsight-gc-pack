@@ -13,7 +13,8 @@ GC_CITY_PATH. Durable hindsight-document and hindsight-bank records stay status
 pinned, unassigned and unrouted. metadata.hindsight uses schema_version 1 and
 api/bank/kind/document_id identity; its data holds document attempt/last_success/
 source or bank latest_run/latest_full_scan/last_success. No local health journal
-or shared lock exists. Keep one active archivist writer per bank.
+exists. A city-local ship lock prevents overlap after a session reset; it does
+not coordinate separate cities. Keep one active archivist writer per bank.
 
 The shipper drains bank operations, recovers original unresolved attempts with
 bounded retry, and persists a UUID intent and payload before each retain POST.
@@ -27,26 +28,13 @@ servers used for the templates support this contract.
 Correctness lives in the script. Humans and other formulas use the same
 gc hindsight ship command, which queues work outside the archivist and owns
 local --dry-run previews. This workflow runs real shipping requests.
-"""
-formula = "mol-hindsight-ship"
-version = "0.1.0"
-phase = "vapor"
-pour = true
 
-[vars]
+This root is the complete executable task; there are no child step beads.
+Execute the phases below in order, in one claimed archivist session. Always
+report the outcome, including failures, before closing the root.
 
-[vars.request]
-description = "Base64 JSON argv from the ship command. Empty means the scheduled scan."
-default = ""
+## 1. Ship sync
 
-[vars.docs_roots]
-description = "Space-separated Git docs roots. Empty means auto: every rig's docs/ even if absent from checkout, city docs/ if present, and HINDSIGHT_DOCS_ROOTS."
-default = ""
-
-[[steps]]
-id = "ship-sync"
-title = "Run the ship sync"
-description = """
 Run the pack's ship command:
 
     gc hindsight ship --request '{{request}}' --fetch {{docs_roots}}
@@ -75,7 +63,7 @@ For --reprocess, retain completes before the server document reprocess call.
 On exit 3, inspect receipts and live operation details before retrying: a bank
 drain can time out on consolidation or mental-model refreshes after earlier
 document work succeeded. Do not repeat --reprocess solely because of that wait;
-follow the report step's receipt checks even if this step cannot complete.
+follow the report phase's receipt checks even if shipping cannot complete.
 The reprocess endpoint is not caller-idempotent. A lost acknowledgement leaves phase
 reprocess_prepared and fails closed. Never blindly retry the POST or clear the
 attempt. A human must inspect the operation list and repair
@@ -83,13 +71,14 @@ metadata.hindsight.data.attempt.reprocess_operation_id with the actual UUID and
 metadata.hindsight.data.attempt.phase to reprocess_wait, preserving other state,
 before an ordinary scan resumes recovery. This requests reprocessing, not a
 verified guarantee of unchanged-chunk invalidation inside the server.
-"""
 
-[[steps]]
-id = "report"
-title = "Report outcomes"
-needs = ["ship-sync"]
-description = """
+## 2. Report
+
+Read `gc hindsight status --task <claimed-root-id>` using this root's actual ID.
+Its document_receipts are confirmed successes attributed to this task, across
+session resets; recent_scans lists up to 20 earlier scans plus the latest one.
+Report those receipts separately from the last scan's counters. A running older
+scan may have been interrupted; do not infer completion from its counters.
 Summarize the run in the bead notes: counts of shipped / skipped / refused /
 failed, and the specific doc ids for anything refused or failed. If any doc
 FAILED extraction (operation status 'failed'), read the operation's
@@ -114,4 +103,25 @@ Escalate incomplete roots, failed fetches, GONE findings, and any stale full-sca
 health alongside refusals and failures. Exit 5 means the run could not establish
 complete state, including operation-list or inventory failures. A clean run
 needs no mail; close quietly.
+Write the report to this root's notes before closing this root. If shipping
+was incomplete, record that explicitly in both notes and the close reason;
+closing the workflow does not declare the bank healthy or retry any operation.
+Close as the claimed root's confirmed assignee using --actor, never --force.
+After closing, run gc hook --claim --json and execute any next claimed task;
+go idle only when no work is returned. Do not wait for an external reminder.
 """
+formula = "mol-hindsight-ship"
+version = "0.2.0"
+phase = "vapor"
+
+# Legacy poured children are excluded from controller demand. Keep all phases
+# in this task root so queued work can wake and be claimed by the archivist.
+[vars]
+
+[vars.request]
+description = "Base64 JSON argv from the ship command. Empty means the scheduled scan."
+default = ""
+
+[vars.docs_roots]
+description = "Space-separated Git docs roots. Empty means auto: every rig's docs/ even if absent from checkout, city docs/ if present, and HINDSIGHT_DOCS_ROOTS."
+default = ""

@@ -1,7 +1,7 @@
 """Schema and ship orchestration tests; Git and ingestion permutations live below us."""
 import base64
 from copy import deepcopy
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stdout, redirect_stderr, nullcontext
 import hashlib
 import importlib.util
 import io
@@ -46,6 +46,7 @@ def report_store():
     """Mock the persistence boundary, retaining value-copy semantics."""
     rows = {}
     store = Mock(city="/city")
+    store.current_work.return_value = ""
     store.get.side_effect = lambda kind, document_id="": deepcopy(rows.get((kind, document_id)))
 
     def put(kind, document_id, data):
@@ -185,6 +186,7 @@ class ShipCLITest(unittest.TestCase):
                                   ("API", Mock(return_value=self.api)),
                                   ("Ingestor", Mock(return_value=self.ingestor)),
                                   ("require_writer", Mock()),
+                                  ("ship_lock", Mock(side_effect=lambda store: nullcontext())),
                                   ("snapshot", Mock(return_value=self.snapshot)),
                                   ("derive", Mock(return_value=schema.validate(FIELDS)))):
             p = patch.object(ship_docs, name, replacement)
@@ -293,6 +295,19 @@ class ShipCLITest(unittest.TestCase):
         self.api.drain.assert_called_once_with(300)
         self.assertEqual(report["status"], "ok")
         self.assertEqual(report["counts"]["shipped"], 1)
+
+    def test_overlap_is_refused_before_replacing_scan_or_reading_bank(self):
+        self.ship("--full-scan")
+        previous = self.store.get("bank")
+        self.store.put.reset_mock()
+        self.api.reset_mock()
+        self.ingestor.reset_mock()
+        ship_docs.ship_lock.side_effect = Error("another ship process still owns this bank", 3)
+        self.ship(code=3)
+        self.assertEqual(self.store.get("bank"), previous)
+        self.store.put.assert_not_called()
+        self.assertEqual(self.api.mock_calls, [])
+        self.assertEqual(self.ingestor.mock_calls, [])
 
     def test_recovery_precedes_inventory_and_force_only_suppresses_matching_reprocess(self):
         item, digest, _ = ship_docs.item_from(DOCUMENT, schema.validate(FIELDS))

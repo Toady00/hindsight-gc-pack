@@ -13,7 +13,9 @@
 # is 0 either way — the session is materialized on demand.
 
 scope = "city"
-wake_mode = "fresh"
+# Fresh mode cycles a live session after its next hook claim, potentially while
+# the newly claimed task's foreground command is already running.
+wake_mode = "resume"
 work_dir = ".gc/agents/archivist"
 nudge = "Run gc hook --claim --json now; if it returns work, execute the claimed formula immediately."
 idle_timeout = "30m"

@@ -1,5 +1,54 @@
 # Review Pitfalls
 
+- In installed gc `4eb766c0b`, `cycleAliveSessionForFreshReassign` kills an
+  already-live `wake_mode=fresh` session when its assigned work diverges from
+  `currently_processing_bead_id`. The September 23 shipping interruption
+  followed that fresh-reassignment path. The archivist now uses `resume` for
+  sequential queue consumption. Receipt attribution uses the canonical
+  `current_claim_bead_id`, not the lagging controller anchor. A city-local
+  shipping lock prevents a reset's surviving ship process from overlapping
+  another ship process. New attempts/receipts/scans carry work_id; old receipts
+  cannot be retroactively attributed. Status --task separates receipt evidence
+  from the last scan's counters, with only 20 prior scan snapshots retained.
+
+- During approved live recovery on 2026-09-23 UTC, retiring the last legacy
+  children auto-closed `lv-mt9e` and `lv-c5ga` with generic `all steps complete`
+  reasons. Explicit recovery notes/labels/metadata identify them as superseded
+  without execution; do not interpret the auto-close reason as script success.
+  The scheduler created root-only tasks `lv-dq60` and `lv-f93v`, and the existing
+  named archivist woke and claimed work. This differs from the isolated fixture's
+  ephemeral worker: do not generalize that fixture identity to an existing city.
+  Maintenance completed cleanly. Shipping needed a continuation reminder after
+  maintenance; the controller also performed a fresh continuation reset during
+  shipping, and later scans waited on consolidation after new ordinary retains
+  had succeeded. The final report covered the last timed-out scan, not all earlier
+  writes. Inspect receipts and session continuity before attributing retries to
+  model behavior or claiming unattended queue draining has been verified.
+
+- Installed gc `1.4.2+local.4eb766c0b` rejects temporary HOME in `gc register`
+  because it invokes platform supervisor start, even with a foreground supervisor
+  already running. Isolated lifecycle tests should run `gc supervisor run` and
+  seed only their temporary GC_HOME registry, not restore the real HOME.
+- Installed gc's file store shares Ready candidate filtering with BdStore, but
+  `gc hook --claim` still uses BdStore/`bd` for work claims. Use real isolated
+  Beads for full lifecycle coverage. The file-store API also lacks Beads notes.
+  The runtime test uses a temporary loopback Dolt server, configures it through
+  `gc beads city use-external`, and registers Gas City's custom issue types.
+- gc prepends its executable directory to a worker's PATH. A mock Hindsight
+  CLI can be shadowed by the real CLI in that directory. Restore the fixture's
+  allowlisted PATH inside the worker before executing any description commands.
+- In new isolated cities on gc `4eb766c0b`, template-routed work wakes an ephemeral
+  demand worker; an existing named identity can instead resume, as in live recovery.
+  Ephemeral hook claims use the session bead ID,
+  while the default close actor can be the pool runtime name. Close as the
+  confirmed assignee with `--actor`, not `--force`. Immediate API bead reads
+  can be stale after CLI claims; lifecycle assertions use `gc bd show` readback.
+  A 200ms test patrol also exposed phantom pool identity collapse and worker
+  reaping during claims; the fixture uses a 5s patrol, not accelerated polling.
+- Scheduled empty-root shipping needs modern Bash: macOS Bash 3.2 rejects an
+  empty `ROOTS[@]` expansion under `set -u`. The runtime fixture checks for and
+  uses Bash 4.4+ rather than letting /bin/bash shadow the deployment shell.
+
 - On 2026-09-19, `lv-dblx` was closed as blocked after repeated drain timeouts,
   but all five selected ingestion documents had successful reprocess receipts
   and completed child operations with zero extraction errors. `API.drain()`
@@ -11,13 +60,18 @@
   03:55:29 UTC, followed by mental-model refreshes; bank health still reflected
   the latest incomplete scan.
 
-- Current Gas City compiles `phase = "vapor"` formulas without `pour = true`
-  into root-only wisps even when they declare steps. Ship and maintenance need
-  `pour = true`: their executable commands live in child descriptions. Test
-  `gc formula show --json` for real compiled children and dependencies, not just
-  TOML step descriptions. Editing a formula does not expand already-cooked runs.
-  Run `lv-dblx` exposed this on 2026-09-19; inspect its status before resubmitting
-  any reprocess request, since the archivist may recover it from saved metadata.
+- In gc `4eb766c0b`, legacy poured molecule roots and their step children are
+  intentionally excluded from controller Ready/demand. `bd ready` alone is not
+  evidence they can wake the on-demand archivist. The `pour = true` fix in
+  `2f6a28c` stranded roots `lv-mt9e` and `lv-c5ga`; the earlier successful
+  `lv-dblx` was already claimed before that change and did not validate it.
+  Ship and maintenance now use root-only vapor tasks with every ordered phase,
+  reporting and root-close instructions in the root description, no children.
+  Never remove `pour` while leaving executable instructions only in `[[steps]]`.
+  Test actual instantiation, demand, wake, claim, execution and completion with
+  `HINDSIGHT_RUNTIME_TEST=1`, not only `gc formula show`. Existing beads are not
+  retrofitted; recheck live state and receipts and agree on recovery before edits.
+  The unsplit-city route-recovery storage warning is unrelated to eligibility.
 
 - On 2026-09-18, all 11 live `stacked-chips-v2` document records lacked
   `retain_params.strategy`, and the bank had no `retain_default_strategy`.

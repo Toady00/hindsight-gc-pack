@@ -235,34 +235,45 @@ class GasCityCompatibilityTest(CommandFixture):
         self.assertNotIn("gc hindsight read", prompt)
         self.assertNotIn("gc mail send", prompt)
 
-    def test_vapor_formulas_materialize_their_executable_steps(self):
+    def test_vapor_roots_preserve_complete_ordered_workflows(self):
         for name in ("mol-hindsight-ship", "mol-hindsight-consolidate"):
             with self.subTest(formula=name):
                 source = tomllib.loads((PACK / "formulas" / f"{name}.toml").read_text())
                 args = [self.gc, "--city", str(self.root), "formula", "show", name, "--json"]
                 if name == "mol-hindsight-ship":
                     args += ["--var", "request=fixture-request"]
+                else:
+                    args += ["--var", "audit_models=fixture-model"]
                 compiled = json.loads(self.run_command(*args).stdout)
-                self.assertTrue(compiled["pour"])
-                steps = {step["id"]: step for step in compiled["steps"]}
-                self.assertEqual(set(steps), {name} | {f"{name}.{s['id']}" for s in source["steps"]})
-                for step in source["steps"]:
-                    for dependency in step.get("needs", []):
-                        self.assertIn(dict(step_id=f"{name}.{step['id']}",
-                                           depends_on_id=f"{name}.{dependency}", type="blocks"),
-                                      compiled["deps"])
+                self.assertEqual(source["phase"], "vapor")
+                self.assertFalse(source.get("pour", False))
+                self.assertFalse(source.get("steps"))
+                self.assertEqual(len(compiled["steps"]), 1)
+                self.assertFalse(compiled.get("deps"))
+                root = compiled["steps"][0]
+                self.assertEqual(root["id"], name)
+                self.assertEqual(root["type"], "task")
+                description = root["description"]
+                self.assertNotIn("{{", description)
+                self.assertIn("notes before closing this root", description)
                 if name == "mol-hindsight-ship":
-                    self.assertIn("gc hindsight ship --request 'fixture-request'",
-                                  steps[f"{name}.ship-sync"]["description"])
-                    report = steps[f"{name}.report"]["description"]
+                    self.assertEqual(re.findall(r"(?m)^## (.*)$", description), ["1. Ship sync", "2. Report"])
+                    self.assertIn("gc hindsight ship --request 'fixture-request'", description)
                     for text in ("last_success receipts", "extraction child results",
                                  "Report confirmed document completion separately",
                                  "Do not repeat --reprocess", "ordinary scan"):
-                        self.assertIn(text, report)
+                        self.assertIn(text, description)
+                else:
+                    self.assertEqual(re.findall(r"(?m)^## (.*)$", description),
+                                     ["1. Maintain", "2. Model audit", "3. Report"])
+                    for text in ("gc hindsight maintain", "unless maintain exited 0 or 2",
+                                 "fixture-model", 'gc hindsight read -o json mental-model get',
+                                 "Mail the mayor", "drain/consolidate/audit_findings"):
+                        self.assertIn(text, description)
 
     def test_formula_commands_dispatch_and_preserve_requests_and_failures(self):
         formula = tomllib.loads((PACK / "formulas/mol-hindsight-ship.toml").read_text())
-        command = re.search(r"(?m)^ {4}(\S.*)$", formula["steps"][0]["description"]).group(1)
+        command = re.search(r"(?m)^ {4}(\S.*)$", formula["description"]).group(1)
         self.mock(self.pack / "assets/scripts/ship-docs.sh")
         self.writer()
         self.run_command("bash", "-eu", "-c", command.replace("{{request}}", "").replace(
@@ -279,13 +290,13 @@ class GasCityCompatibilityTest(CommandFixture):
         self.assertEqual(len(self.calls()), 2)
 
         formula = tomllib.loads((PACK / "formulas/mol-hindsight-consolidate.toml").read_text())
-        command = re.search(r"(?m)^ {4}(\S.*)$", formula["steps"][0]["description"]).group(1)
+        command = re.search(r"(?m)^ {4}(\S.*)$", formula["description"]).group(1)
         self.mock(self.pack / "assets/scripts/bank-maintain.sh")
         self.env["MOCK_EXIT"] = "5"
         self.run_command("bash", "-eu", "-c", command, code=5)
         self.assertEqual(self.calls()[-1]["tool"], "bank-maintain.sh")
         self.env.pop("MOCK_EXIT")
-        command = re.findall(r"\(`([^`]+)`\)", formula["steps"][1]["description"])[-1].replace("<id>", "landmines")
+        command = re.findall(r"\(`([^`]+)`\)", formula["description"])[-1].replace("<id>", "landmines")
         self.run_command("bash", "-eu", "-c", command)
         self.assertEqual(self.calls()[-1]["args"], [
             "-o", "json", "mental-model", "get", "fixture bank", "landmines",

@@ -1,5 +1,6 @@
 """Git-only document shipping with durable, completion-aware Beads receipts."""
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -12,7 +13,7 @@ import sys
 sys.dont_write_bytecode = True
 from connection import resolve
 from git_snapshot import _git, snapshot
-from ingestion import API, BeadsStore, Error, Ingestor, _payload_hash, require_writer
+from ingestion import API, BeadsStore, Error, Ingestor, _payload_hash, require_writer, ship_lock
 from ship_report import ScanReport
 
 PACK = Path(__file__).resolve().parents[2]
@@ -122,6 +123,7 @@ def main():
     args = parser.parse_args()
     # Unexpected exceptions must not let the report finalizer manufacture success.
     code, report, started = 5, None, False
+    resources = ExitStack()
     try:
         if not args.bank or args.drain_timeout < 0:
             raise Error("set HINDSIGHT_BANK or --bank; drain timeout must be nonnegative", 2)
@@ -135,9 +137,13 @@ def main():
                           HINDSIGHT_API_KEY=connection["key"], HINDSIGHT_KNOWN_DOMAINS_FILE=args.domains)
         store = BeadsStore(connection["api"], args.bank)
         api = API(connection["api"], args.bank)
-        ingestor = Ingestor(store, api)
+        work_id = ""
+        if not args.dry_run:
+            resources.enter_context(ship_lock(store))
+            work_id = store.current_work()
+        ingestor = Ingestor(store, api, work_id=work_id)
         full = args.full_scan or not args.roots
-        report = ScanReport(store, full)
+        report = ScanReport(store, full, work_id=work_id)
         counts = dict(shipped=0, skipped=0, refused=0, failed=0, gone=0, incomplete=0, recovered=0)
         report.run["counts"] = counts
 
@@ -263,15 +269,18 @@ def main():
                 report.run["roots"] = [dict(root="", status="failed", detail=str(error))]
                 report.run["counts"]["incomplete"] = 1
     finally:
-        if report is not None:
-            print("---")
-            print(" ".join(f"{key}={value}" for key, value in report.run["counts"].items()))
-        if started:
-            try:
-                print(f"scan record: {report.finish(code)}")
-            except Error as error:
-                print(f"ship report: {error}", file=sys.stderr)
-                code = 5
+        try:
+            if report is not None:
+                print("---")
+                print(" ".join(f"{key}={value}" for key, value in report.run["counts"].items()))
+            if started:
+                try:
+                    print(f"scan record: {report.finish(code)}")
+                except Error as error:
+                    print(f"ship report: {error}", file=sys.stderr)
+                    code = 5
+        finally:
+            resources.close()
     return code
 
 

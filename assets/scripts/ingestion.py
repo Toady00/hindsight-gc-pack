@@ -7,6 +7,7 @@ not a distributed lock. No successful document hash is inferred from inventory.
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
+import fcntl
 import hashlib
 import json
 import math
@@ -32,6 +33,23 @@ def now():
 def require_writer():
     if os.environ.get("HINDSIGHT_WRITER") != "archivist" or not os.environ.get("GC_SESSION_ID"):
         raise Error("writes require HINDSIGHT_WRITER=archivist and GC_SESSION_ID", 2)
+
+
+@contextmanager
+def ship_lock(store):
+    """Exclude overlapping ship processes surviving a controller/session reset."""
+    directory = Path(store.city) / ".gc/hindsight/locks"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / (_hash([store.api, store.bank]) + ".ship.lock")
+    with path.open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Error("another ship process still owns this bank; wait for it before resuming", 3) from None
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def _json(value):
@@ -93,6 +111,33 @@ class BeadsStore:
             return json.loads(result.stdout)
         except (ValueError, TypeError):
             raise Error("Beads returned invalid JSON") from None
+
+    def current_work(self):
+        """Resolve the canonical claim, not the controller's lagging work anchor."""
+        session_id = os.environ.get("GC_SESSION_ID", "")
+        if not session_id:
+            return ""
+        rows = self._call("show", session_id, "--json")
+        if (not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict)
+                or rows[0].get("id") != session_id):
+            raise Error("cannot confirm archivist session identity")
+        metadata = rows[0].get("metadata") or {}
+        if not isinstance(metadata, dict):
+            raise Error("invalid archivist session metadata")
+        work_id = metadata.get("current_claim_bead_id", "")
+        if not work_id:
+            return ""
+        if not isinstance(work_id, str) or work_id.startswith("-"):
+            raise Error("invalid claimed work ID")
+        work = self._call("show", work_id, "--json")
+        owners = {value for value in (session_id, metadata.get("alias"), metadata.get("agent_name"))
+                  if isinstance(value, str) and value}
+        if (not isinstance(work, list) or len(work) != 1 or not isinstance(work[0], dict)
+                or work[0].get("id") != work_id
+                or work[0].get("status") != "in_progress" or not work[0].get("assignee")
+                or work[0]["assignee"] not in owners):
+            raise Error("cannot attribute shipping to a confirmed active claim")
+        return work_id
 
     def _identity(self, kind, document_id):
         if not isinstance(kind, str) or kind not in self.TYPES or not isinstance(document_id, str):
@@ -394,8 +439,9 @@ def _children(result):
 
 
 class Ingestor:
-    def __init__(self, store, api):
+    def __init__(self, store, api, work_id=""):
         self.store, self.api = store, api
+        self.work_id = work_id
 
     def _save(self, document_id, state):
         # The store owns write confirmation; a second read adds no guarantee.
@@ -534,6 +580,8 @@ class Ingestor:
                                          "operation_id": attempt["operation_id"], "completed_at": completed_at}
                 if reprocessing:
                     state["last_success"]["reprocess_operation_id"] = op_id
+                if attempt.get("work_id"):
+                    state["last_success"]["work_id"] = attempt["work_id"]
                 state["source"] = deepcopy(attempt["source"])
                 attempt["state"] = "succeeded"
                 attempt["completed_at"] = completed_at
@@ -576,6 +624,10 @@ class Ingestor:
             if recovered and matches and (not force or recovered_reprocess):
                 # A resumed force attempt already performed its requested reprocess.
                 return "shipped"
+            if (force and self.work_id and receipt.get("work_id") == self.work_id
+                    and receipt.get("reprocess_operation_id") and matches and bank_hash == source_hash):
+                # Re-entering the same task after a reset is not a new force request.
+                return "unchanged"
             if not force and matches and bank_hash == source_hash:
                 return "unchanged"
             self.api.capabilities()
@@ -585,6 +637,8 @@ class Ingestor:
                                 "operation_id": op_id, "state": "prepared", "phase": "retain",
                                 "payload": {"items": [deepcopy(item)], "async": True, "operation_id": op_id},
                                 "source": deepcopy(source), "reprocess": bool(force), "prepared_at": now()}
+            if self.work_id:
+                state["attempt"]["work_id"] = self.work_id
             self._submit(document_id, state)
             self._finish(document_id, state, deadline, retry=False)
             return "shipped"

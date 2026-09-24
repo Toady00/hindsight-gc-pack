@@ -28,7 +28,13 @@ if tool == "gc" and args[:1] == ["bd"]:
     assert args[1:3] == ["--city", os.environ["GC_CITY_PATH"]] and "--json" in args
     db = json.loads((root / "beads.json").read_text())
     command = args[3]
-    if command == "list":
+    if command == "show":
+        if args[4] == "fixture-session":
+            result = [dict(id="fixture-session", metadata=dict(current_claim_bead_id="fixture-work"))]
+        else:
+            assert args[4] == "fixture-work"
+            result = [dict(id="fixture-work", status="in_progress", assignee="fixture-session")]
+    elif command == "list":
         assert "--all" in args and value("--limit") == "0"
         result = [r for r in db["issues"] if value("--label") in r["labels"]]
     elif command == "config":

@@ -29,6 +29,17 @@ needs its own bank, connection settings and access to the city Beads store.
 One city owns each writable bank; there is no distributed lock or protection
 against a separate city writing it.
 
+A city-local advisory lock excludes overlapping ship processes, including a
+foreground script surviving a session reset. A second ship exits 3 before
+replacing scan state; let the owner finish. Do not remove the lock file while
+work is running. Kernel lock ownership is released on process exit.
+
+Managed shipping stamps the session's canonical claimed root ID on attempts,
+receipts, and scans. Re-entering the same task after a reset does not repeat an
+already confirmed `--reprocess` for matching content, parameters, and bank hash.
+A new task's explicit reprocess still runs. Use `gc hindsight status --task <id>`
+for receipt-backed reporting across attempts, independently of last-scan counts.
+
 Every scan freshly fetches `origin`, including previews. The remote's advertised
 HEAD selects the default branch; local `origin/HEAD` and local HEAD are not
 fallbacks. `--ref` selects a published remote branch and accepts `foo`,
