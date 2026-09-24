@@ -51,6 +51,7 @@ extraction and apply forward-only (see "Two properties worth knowing").
 | `commands/ship/` | `gc <binding> ship` — ship the docs manually at any point (auto-resolves roots; owns `--dry-run` for previews). Pack commands are namespaced by the import binding, so `[imports.hindsight]` makes it `gc hindsight ship` |
 | `commands/survey/` | `gc <binding> survey prepare\|show\|stamp\|publish\|cleanup <root>` — the survey's mechanical steps, shared by the formula and humans |
 | `commands/read/`, `commands/maintain/`, `commands/retain/`, `commands/status/` | `gc hindsight read`, `gc hindsight maintain`, `gc hindsight retain`, `gc hindsight status`: reads, guarded maintenance and bank-native retention, and shared Beads health |
+| `commands/lint/` | Optional `gc hindsight lint`: semantic checks on explicit local documents using TypeSafe Jev; `--dry-run` previews requests without API access |
 | `assets/scripts/ship-docs.sh` | Git-only docs shipping from freshly fetched origin branches. Shared Beads receipts track intent, recovery and confirmed completion; bank hashes alone never prove success. Validation, drain-before-ship, operation polling and GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
@@ -175,6 +176,24 @@ without calling the bank. Use `gc hindsight maintain` for maintenance and
 `gc hindsight retain` for arbitrated bank-native memories, only in the managed
 archivist. Use `gc hindsight read` for read operations. See
 [OPERATIONS.md](OPERATIONS.md) for connection settings, bootstrap and recovery.
+
+## Optional semantic lint experiment
+
+`gc hindsight lint --dry-run /absolute/path/to/doc.md` previews document-local semantic
+checks against the docs schema. With `TYPESAFE_API_KEY` set, omit `--dry-run` to
+evaluate the document with Jev. `--json` preserves inputs, probabilities, model
+identity, usage and latency for comparison. The command suggests findings and
+never edits documents or writes to the bank. It has no scheduled or shipping
+integration; TypeSafe access is optional and no SDK is required.
+
+Run it from a rig too. For a checkout outside the city directory, set
+`GC_CITY=/absolute/path/to/city`; relative document paths still resolve from your
+working directory. Full documents are preserved, with context limits enforced by
+the selected model's API rather than a local byte cutoff.
+
+See [lint usage and evaluation](commands/lint/help.md) and the
+[draft proposals](docs/discussion.memory.semantic-checks.0001.md) for frontmatter
+assistance, proposal intake, and candidate selection experiments.
 
 ## The shipping contract
 

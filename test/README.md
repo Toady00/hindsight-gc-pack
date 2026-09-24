@@ -25,6 +25,7 @@ not to repeat the ingestion state machine.
 | `test_git_snapshot.py` | Real Git publication branches, fetch failures, immutable snapshots, worktrees |
 | `PackShellTest` and `MemoryShellTest` | Narrow shipping/recovery paths, queueing, audits, recovery before bumping hit counts |
 | `test_commands.py` | Wrapper forwarding, admission guards, real Gas City rendering and dispatch |
+| `test_semantic_lint.py` | Optional lint request construction, schema admission, response validation, uncertainty, service failures and evaluation accounting, all offline |
 | `test_survey.py` | Real local Git worktrees, survey validation, retries, publication and cleanup with mocked Beads/forge commands |
 | `test_survey_integration.py` | Installed Gas City survey rendering, compilation, rig routing, variable persistence and scope lifecycle in unregistered fixture cities |
 
@@ -57,6 +58,14 @@ They are not golden answers: the conventions model includes an unsupported
 reaffirmation date. The new live checks treat that as a failure.
 
 ## Optional live evaluation
+
+For the separate TypeSafe semantic-lint experiment, use
+`python3 test/evaluate_semantic_lint.py --dry-run` to preview labeled fixture
+requests without a key. Omit `--dry-run` with `TYPESAFE_API_KEY` set to evaluate
+them live. See [lint help](../commands/lint/help.md). This does not use a Hindsight
+bank, and offline discovery never runs it live.
+
+### Hindsight answer quality
 
 This consumes extraction and reflect calls. Run provisioning and shipping in
 the managed archivist, sequentially, against a fresh disposable bank. Configure

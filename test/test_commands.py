@@ -18,6 +18,7 @@ import unittest
 
 PACK = Path(__file__).resolve().parents[1]
 HELPERS = {
+    "lint": "semantic_lint.py",
     "read": "hindsight-read.sh",
     "maintain": "bank-maintain.sh",
     "retain": "memory-retain.sh",
@@ -68,9 +69,9 @@ class CommandFixture(unittest.TestCase):
         path.write_text(f"#!{sys.executable}\n" + MOCK)
         path.chmod(0o755)
 
-    def run_command(self, *args, code=0, input=""):
+    def run_command(self, *args, code=0, input="", cwd=None):
         result = subprocess.run(
-            args, cwd=self.root, env=self.env, input=input,
+            args, cwd=cwd or self.root, env=self.env, input=input,
             capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
@@ -208,6 +209,36 @@ class GasCityCompatibilityTest(CommandFixture):
             "memory", "reflect", "fixture bank", "<the task, verbatim>",
             "--tags", "repo:widgets,scope:platform", "--tags-match", "any_strict", "--budget", "mid",
         ]])
+
+    def test_semantic_lint_preview_dispatches_without_services_or_key(self):
+        shutil.copytree(PACK / "schemas", self.pack / "schemas")
+        path = self.root / "doc with spaces.md"
+        path.write_text((PACK / "test/docs/spec.eventing.transport.0001.md").read_text())
+        self.env.pop("TYPESAFE_API_KEY", None)
+        result = self.run_command(self.gc, "hindsight", "lint", "--dry-run", str(path))
+        report = json.loads(result.stdout)
+        self.assertEqual(report["documents"][0]["status"], "preview")
+        self.assertIn("accepted-draft", report["documents"][0]["request"]["questions"])
+        self.assertIn("state", report["documents"][0]["request"])
+        self.assertEqual(self.calls(), [])
+
+    def test_semantic_lint_from_rig_preserves_relative_document_paths(self):
+        shutil.copytree(PACK / "schemas", self.pack / "schemas")
+        self.env.pop("TYPESAFE_API_KEY", None)
+        for key in ("GC_CITY", "GC_CITY_PATH", "GC_CITY_ROOT"):
+            self.env.pop(key, None)
+        with tempfile.TemporaryDirectory(prefix="hindsight-external-rig-") as external:
+            for rig, city in ((self.root / "widgets", None), (Path(external), str(self.root))):
+                with self.subTest(rig=rig, city=city):
+                    if city:
+                        self.env["GC_CITY"] = city
+                    path = rig / "doc with spaces.md"
+                    path.write_text((PACK / "test/docs/spec.eventing.transport.0001.md").read_text())
+                    result = self.run_command(self.gc, "hindsight", "lint", "--dry-run", path.name, cwd=rig)
+                    report = json.loads(result.stdout)
+                    self.assertEqual(report["documents"][0]["status"], "preview")
+                    self.assertEqual(report["documents"][0]["path"], path.name)
+        self.assertEqual(self.calls(), [])
 
     def test_archivist_renders_writer_instructions_and_arbitration(self):
         prompt = self.render("hindsight.archivist")

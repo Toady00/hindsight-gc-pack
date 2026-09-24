@@ -1,0 +1,68 @@
+{
+  "frontmatter": {
+    "schema_version": 2,
+    "type": "spec",
+    "title": "Semantic lint evaluation fixture",
+    "status": "accepted",
+    "source": "agent",
+    "scope": "repo",
+    "repos": ["svc-widgets"],
+    "updated_at": "2026-09-23T00:00:00Z"
+  },
+  "cases": [
+    {
+      "id": "current-draft-banner",
+      "body": "# Widget transport\n\nStatus: DRAFT. This document awaits approval and is not accepted.\n\nThe proposed widget transport uses SQS.\n",
+      "expected": {"accepted-draft": true, "repo-platform-mandate": false}
+    },
+    {
+      "id": "historical-draft",
+      "body": "# Widget transport\n\nThis specification is accepted. It was a draft during the August review.\n\nThe widget service uses SQS.\n",
+      "expected": {"accepted-draft": false, "repo-platform-mandate": false}
+    },
+    {
+      "id": "another-document-draft",
+      "body": "# Widget transport\n\nThis specification is accepted and requires SQS for svc-widgets. The separate EventBridge ADR remains DRAFT and awaits approval.\n",
+      "expected": {"accepted-draft": false, "repo-platform-mandate": false}
+    },
+    {
+      "id": "quoted-and-code-draft",
+      "body": "# Rendering document badges\n\nThis accepted spec defines the svc-widgets renderer. Its tests must display the following sample document text:\n\n> Status: DRAFT. Awaiting approval.\n\nThe sample is test input, not this specification's standing.\n\n```python\nstatus = 'DRAFT'\n```\n",
+      "expected": {"accepted-draft": false, "repo-platform-mandate": false}
+    },
+    {
+      "id": "self-asserted-platform-authority",
+      "body": "# Widget transport\n\nThis accepted specification establishes a binding standard for every repository in the platform. All services, not just svc-widgets, MUST use our widget queue format. This document is the authority for that platform-wide rule.\n",
+      "expected": {"accepted-draft": false, "repo-platform-mandate": true}
+    },
+    {
+      "id": "reference-platform-convention",
+      "body": "# Widget storage\n\nThis accepted specification applies only to svc-widgets. The existing platform database convention requires PostgreSQL across all services; we follow that independently established convention here. This document creates no platform-wide rules.\n",
+      "expected": {"accepted-draft": false, "repo-platform-mandate": false}
+    },
+    {
+      "id": "survey-is-future-plan",
+      "frontmatter": {"type": "current-state", "status": "draft"},
+      "body": "# Widget architecture\n\nWe propose building a new widget service. First implement an HTTP handler, then create a PostgreSQL database and add a queue. The service should expose three endpoints. Next quarter we will add tracing. No code has been inspected or implemented yet.\n",
+      "expected": {"repo-platform-mandate": false, "survey-future-plan": true}
+    },
+    {
+      "id": "survey-with-recommendations",
+      "frontmatter": {"type": "current-state", "status": "draft"},
+      "body": "# Widget current state\n\nThe HTTP entry point in src/main.go:20 registers POST /widgets. src/store.go:44 writes records to PostgreSQL. src/queue.go:18 publishes SQS messages after the write. Tests exercise the handler with a fake store; no test covers queue failure.\n\n## Recommendations\n\nAdd a queue-failure integration test. A TODO proposes an outbox, but the code does not implement one today.\n",
+      "expected": {"repo-platform-mandate": false, "survey-future-plan": false}
+    },
+    {
+      "id": "gotcha-only-outage",
+      "frontmatter": {"type": "gotcha"},
+      "body": "# Widget service status\n\nThe widget service is unavailable this morning during the migration. Wait until the operator announces completion. This entry contains no diagnosis or reusable lesson; delete it after the service returns.\n",
+      "expected": {"accepted-draft": false, "repo-platform-mandate": false, "gotcha-transient": true}
+    },
+    {
+      "id": "gotcha-durable-version-specific",
+      "frontmatter": {"type": "gotcha"},
+      "body": "# Retry keys in widget client 2.1\n\nYesterday's outage exposed a durable trap in client 2.1. Its retry loop generates a new idempotency key per attempt. The server therefore processes both requests when the first acknowledgement is lost. Reproduced by dropping the first response in the integration test. Supply a stable caller-generated key across retries while using this version.\n",
+      "expected": {"accepted-draft": false, "repo-platform-mandate": false, "gotcha-transient": false}
+    }
+  ]
+}

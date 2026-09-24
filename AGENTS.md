@@ -1,5 +1,16 @@
 # Review Pitfalls
 
+- Pack commands work from rig directories, but an external/sibling checkout
+  needs importing-city context: `GC_CITY=/absolute/path/to/city gc hindsight ...`.
+  Verified with real gc dispatch in nested and external fixture directories.
+  Dispatch preserves the caller's cwd, so relative document paths remain rig-local.
+  Without city context, installed gc can misleadingly report `unknown flag:
+  --dry-run` for `gc hindsight lint --dry-run ...`; `--help` can show root help
+  without discovering the pack. Prefer GC_CITY to the pre-binding --city issue
+  noted below. The semantic linter's former 16KB document/28KB request caps were
+  arbitrary and rejected the project's ship-trigger ADR. They are removed;
+  byte counts are not model token counts, and API context limits still apply.
+
 - In installed gc `4eb766c0b`, `cycleAliveSessionForFreshReassign` kills an
   already-live `wake_mode=fresh` session when its assigned work diverges from
   `currently_processing_bead_id`. The September 23 shipping interruption
