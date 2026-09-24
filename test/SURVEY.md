@@ -61,13 +61,16 @@ instructions before relying on local-only publication.
 Inspect the actual step instructions, not just the command's exit code:
 
 ```bash
-gc bd --rig <rig> list --parent <root> --status all --limit 0 --json
+gc bd --rig <rig> list --status all --limit 0 --json |
+  jq --arg root '<root>' '[.[] | select(.metadata["gc.root_bead_id"] == $root)]'
 ```
 
 The prepare description must contain `--publish "none"`. Its routing must
 target `<rig>/hindsight.surveyor`. The provider should wake, claim the prepare
 step, and proceed through survey and publish. Scope checks and finalization
 are controller work; do not close them manually to make the run look passed.
+Workflow members use `tracks` links, so `list --parent <root>` does not find
+them. Filter the rig store by `gc.root_bead_id` instead.
 
 Once preparation has run, from inside the rig checkout:
 

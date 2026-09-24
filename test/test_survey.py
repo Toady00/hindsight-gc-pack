@@ -42,10 +42,17 @@ if tool == "gc":
         metadata.update(rows.get(bead, {}))
         print(json.dumps({"id": os.environ.get("FAIL_ROOT_ID", bead), "metadata": metadata}))
     elif command == "list":
-        assert args[2:] == ["--parent", args[3], "--status", "all", "--limit", "0", "--json"], args
         if os.environ.get("FAIL_SCOPE"):
             sys.exit(1)
-        print(json.dumps(rows.get(args[3], {}).get("scopes", [])))
+        beads = [scope for row in rows.values() for scope in row.get("scopes", [])]
+        options = args[2:]
+        if options[:1] == ["--parent"]:
+            parent, options = options[1], options[2:]
+            beads = [bead for bead in beads if any(
+                dep["type"] == "parent-child" and dep["depends_on_id"] == parent
+                for dep in bead.get("dependencies", []))]
+        assert options == ["--status", "all", "--limit", "0", "--json"], args
+        print(json.dumps(beads))
     elif command == "update":
         if os.environ.get("FAIL_METADATA") == "error":
             sys.exit(1)
@@ -146,7 +153,8 @@ class SurveyTest(unittest.TestCase):
     def scope_pass(self, root="run-1"):
         scope = {"id": f"{root}-scope", "status": "closed", "metadata": {
             "gc.root_bead_id": root, "gc.step_ref": "current-state-survey.worktree",
-            "gc.kind": "scope", "gc.scope_role": "body", "gc.outcome": "pass"}}
+            "gc.kind": "scope", "gc.scope_role": "body", "gc.outcome": "pass"},
+            "dependencies": [{"type": "tracks", "depends_on_id": root}]}
         self.meta(root, scopes=[scope])
         return scope
 
@@ -432,6 +440,8 @@ class SurveyTest(unittest.TestCase):
         self.document(wt)
         self.run_survey("publish")
         self.meta(**{"gc.outcome": "pass"})
+        # A passing scope from another run must not authorize this cleanup.
+        self.scope_pass("other-run")
         good = self.scope_pass()
         for scopes in ([], [good, good], [dict(good, status="open")],
                        [dict(good, metadata=dict(good["metadata"], **{"gc.outcome": "fail"}))],
@@ -597,7 +607,7 @@ class SurveyTest(unittest.TestCase):
                 self.assertEqual((self.root / "pr-body").read_text().strip(), "Caller-supplied body.")
                 (self.root / "pr-url").unlink()
 
-    def test_root_validation_accepts_real_isolated_formula_metadata(self):
+    def test_cleanup_discovers_real_isolated_formula_scope_by_metadata(self):
         from test.test_survey_integration import SurveyIntegrationTest
 
         SurveyIntegrationTest.setUpClass()
@@ -618,6 +628,19 @@ class SurveyTest(unittest.TestCase):
         # other compiler field when exercising the script through mocked gc.
         self.meta(root["id"], **dict(metadata, **{"gc.root_store_ref": "rig:repo"}))
         self.run_survey("show", root=root["id"])
+        body = next(bead for bead in beads if bead.get("metadata", {}).get("gc.step_ref")
+                    == "current-state-survey.worktree")
+        self.assertEqual(body["metadata"]["gc.root_bead_id"], root["id"])
+        # Scope execution itself is covered by SurveyIntegrationTest. Feed the
+        # compiler's membership metadata to the actual cleanup script too.
+        body["status"] = "closed"
+        body["metadata"]["gc.outcome"] = "pass"
+        self.meta(root["id"], scopes=[body])
+        wt = self.prepare(root=root["id"])
+        self.run_survey("cleanup", root=root["id"])
+        self.assertTrue(wt.exists())
+        self.assertEqual(self.meta(root["id"])["survey_cleanup"],
+                         "preserved: publish=none keeps the branch for inspection")
 
 
 if __name__ == "__main__":

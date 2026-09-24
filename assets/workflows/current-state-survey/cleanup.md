@@ -13,6 +13,8 @@ The scope body has `gc.kind=scope`, `gc.scope_role=body`, and
 `gc.step_ref=current-state-survey.worktree` under this exact root. The
 root's `gc.outcome` is not the gate: workflow finalization can race cleanup.
 Missing or ambiguous scope state must preserve the worktree.
+Membership is identified by `gc.root_bead_id` in the rig store, not by a
+parent-child query; graph-v2 members link to the root with `tracks`.
 
 Run cleanup from outside `work_dir`, for example `cd "$GC_CITY"`, so the
 shell does not remain inside a directory the command removes.

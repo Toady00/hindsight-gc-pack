@@ -454,7 +454,9 @@ cmd_cleanup() {
   else
     if ! $force; then
       local scope status
-      scope="$("$GC" bd --rig "$GC_RIG" list --parent "$ROOT" --status all --limit 0 --json)" || preserve "could not read worktree scope"
+      # Graph-v2 membership uses tracks edges, not parent-child relationships.
+      # Read the rig store without a parent filter, then match the exact root.
+      scope="$("$GC" bd --rig "$GC_RIG" list --status all --limit 0 --json)" || preserve "could not read worktree scope"
       jq -e --arg root "$ROOT" '
       if type != "array" then false else
         [.[] | select(.metadata["gc.root_bead_id"] == $root
