@@ -20,13 +20,15 @@
 #                          drift. A schema with no audit-vocab.json gets
 #                          structural checks only (c/e).
 #   --drain-timeout <sec>  max wait for in-flight operations (default 600)
+#   --consolidate-timeout <sec> max wait per consolidation operation (default 900)
 #   --skip-consolidate     drain + audit only
 #
 # Exit codes (the formula branches on these):
 #   0  clean — consolidated, audit found nothing
 #   2  consolidated fine, but the tag audit has findings (report on stdout)
 #   3  drain timeout — operations still in flight; consolidation was NOT run
-#   4  consolidation failed even after one recover+retry
+#   4  consolidation failed after recover+retry, or timed out without retry
+#   5  operation state or audit inventory could not be read reliably
 #
 # Tag audit checks (all deterministic):
 #   a. axis check      every tag starts with a schema-declared axis
@@ -51,6 +53,7 @@ BANK=""
 DOMAINS_FILE=""
 SCHEMA_DIR=""
 DRAIN_TIMEOUT=600
+CONSOLIDATE_TIMEOUT=900
 SKIP_CONSOLIDATE=false
 
 while [[ $# -gt 0 ]]; do
@@ -60,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --domains) DOMAINS_FILE="$2"; shift 2 ;;
     --schema) SCHEMA_DIR="$2"; shift 2 ;;
     --drain-timeout) DRAIN_TIMEOUT="$2"; shift 2 ;;
+    --consolidate-timeout) CONSOLIDATE_TIMEOUT="$2"; shift 2 ;;
     --skip-consolidate) SKIP_CONSOLIDATE=true; shift ;;
     *) echo "unknown arg: $1" >&2; exit 64 ;;
   esac
@@ -69,6 +73,7 @@ done
 hs_connect
 $SKIP_CONSOLIDATE || hs_require_writer
 [[ "$DRAIN_TIMEOUT" =~ ^[0-9]+$ ]] || { echo "invalid drain timeout" >&2; exit 64; }
+[[ "$CONSOLIDATE_TIMEOUT" =~ ^[0-9]+$ ]] || { echo "invalid consolidation timeout" >&2; exit 64; }
 
 PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ -n "$SCHEMA_DIR" ]] || SCHEMA_DIR="${HINDSIGHT_SCHEMA:-$PACK_DIR/schemas/docs}"
@@ -84,16 +89,44 @@ hs_drain || exit $?
 echo "drained: no operations in flight"
 
 # ---------- 2. consolidate ----------
+# CLI --wait scans only the first operations page and treats a missing ID as
+# success. In JSON mode it also hides terminal failure details. Submit quietly,
+# then poll the specific operation with visible errors and a bounded wait.
+consolidate_once() {
+  local op state
+  hindsight -o json bank consolidate "$BANK" > "$TMP/consolidate.json" || {
+    echo "CONSOLIDATION STATE UNKNOWN: trigger failed; not automatically retried" >&2
+    return 5
+  }
+  op="$(jq -er '.operation_id | select(type == "string" and length > 0)' "$TMP/consolidate.json")" || {
+    echo "CONSOLIDATION STATE UNKNOWN: trigger returned no operation id; not automatically retried" >&2
+    return 5
+  }
+  echo "consolidation operation: $op"
+  state="$(hs_wait_terminal "$op" "$CONSOLIDATE_TIMEOUT")" || return 5
+  case "$state" in
+    completed) return 0 ;;
+    timeout)
+      echo "CONSOLIDATION TIMEOUT: operation $op still in flight; not retried" >&2
+      return 6 ;;
+    *) echo "consolidation $op $state" >&2; return 1 ;;
+  esac
+}
+
 if ! $SKIP_CONSOLIDATE; then
   echo "== consolidate =="
-  if ! hindsight bank consolidate "$BANK" --wait; then
+  rc=0; consolidate_once || rc=$?
+  if [[ "$rc" -eq 1 ]]; then
     echo "consolidation failed; attempting recover + one retry" >&2
-    hindsight bank consolidation-recover "$BANK" || true
-    if ! hindsight bank consolidate "$BANK" --wait; then
-      echo "CONSOLIDATION FAILED after recover+retry" >&2
-      exit 4
-    fi
+    hindsight -o json bank consolidation-recover "$BANK" > "$TMP/recover.json" || true
+    rc=0; consolidate_once || rc=$?
   fi
+  case "$rc" in
+    0) ;;
+    5) echo "CONSOLIDATION STATE UNKNOWN: completion could not be established" >&2; exit 5 ;;
+    6) exit 4 ;;
+    *) echo "CONSOLIDATION FAILED after recover+retry" >&2; exit 4 ;;
+  esac
 fi
 
 # ---------- 3. config drift ----------

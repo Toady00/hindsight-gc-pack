@@ -146,11 +146,11 @@ TMP=$(mktemp -d)
 # semantic match against the bank, scoped to the reported rig
 gc hindsight read -o json memory recall "$HINDSIGHT_BANK" "<symptom>" \
   --tags repo:<rig>,scope:platform --tags-match any_strict \
-  --budget low --max-tokens 1024 > "$TMP/dedup.json" 2>/dev/null
-jq -r '.results[]?.text' "$TMP/dedup.json"
+  --budget low --max-tokens 1024 > "$TMP/dedup.json" &&
+  jq -r '.results[]?.text' "$TMP/dedup.json"
 # existing agent memories, with their ids and hit counts (paged: .items)
-gc hindsight read -o json document list "$HINDSIGHT_BANK" > "$TMP/docs.json" 2>/dev/null
-jq -r '.items[] | select(.document_metadata.kind == "agent-memory")
+gc hindsight read -o json document list "$HINDSIGHT_BANK" > "$TMP/docs.json" &&
+  jq -r '.items[] | select(.document_metadata.kind == "agent-memory")
   | "\(.id)\thits=\(.document_metadata.hit_count // 1)"' "$TMP/docs.json"
 ```
 

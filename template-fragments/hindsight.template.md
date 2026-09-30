@@ -57,28 +57,37 @@ surveys, gotchas — distilled into queryable memory.
 At task start, run ONE reflect scoped to your rig and keep the answer
 for the whole task:
 
-    gc hindsight read memory reflect "$HINDSIGHT_BANK" "<the task, verbatim>" \
-      --tags repo:{{.RigName}},scope:platform --tags-match any_strict --budget mid
+    TMP=$(mktemp -d)
+    gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "<the task, verbatim>" \
+      --tags repo:{{.RigName}},scope:platform --tags-match any_strict --budget mid > "$TMP/reflect.json" &&
+      jq -er '.text' "$TMP/reflect.json"
 {{else}}
 You field many unrelated asks in one session, so there is no single
 task-start ritual. Use reflect at will — once per NEW ask that touches
 the platform, scoped to what the ask touches (include `repo:<rig>` for
 every rig involved):
 
-    gc hindsight read memory reflect "$HINDSIGHT_BANK" "<the ask, verbatim>" \
-      --tags repo:<rig>,scope:platform,scope:business --tags-match any_strict --budget mid
+    TMP=$(mktemp -d)
+    gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "<the ask, verbatim>" \
+      --tags repo:<rig>,scope:platform,scope:business --tags-match any_strict --budget mid > "$TMP/reflect.json" &&
+      jq -er '.text' "$TMP/reflect.json"
 
 Skip the ritual entirely for asks about operating the city itself
 (orchestration, sessions, orders): that knowledge is deliberately not
 in the bank.
-{{end}}{{if .HINDSIGHT_MENTAL_MODELS}}
+{{end}}
+Use `-o json` on every read command, including each command joined with
+`&&`. Older CLIs animate pretty output even in captured agent logs. Read
+reflect's `.text` as the answer; keep stderr visible and treat command
+failures as failures, not empty memory results.
+{{if .HINDSIGHT_MENTAL_MODELS}}
 Also fetch your standing briefs before starting work — read only
 `.content`, never the whole response:
 
     TMP=$(mktemp -d)
     for m in {{.HINDSIGHT_MENTAL_MODELS}}; do
-      gc hindsight read -o json mental-model get "$HINDSIGHT_BANK" "$m" > "$TMP/$m.json" 2>/dev/null
-      jq -r '.content' "$TMP/$m.json"
+      gc hindsight read -o json mental-model get "$HINDSIGHT_BANK" "$m" > "$TMP/$m.json" &&
+        jq -er '.content' "$TMP/$m.json"
     done
 {{end}}
 During work, use `recall` freely for targeted questions (cheap,

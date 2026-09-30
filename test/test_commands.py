@@ -4,14 +4,18 @@ Run compatibility alone: python3 test/test_commands.py GasCityCompatibilityTest
 GC_TEST_BIN overrides PATH discovery; a missing gc skips only compatibility tests.
 """
 import base64
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import tomllib
 import unittest
 
@@ -35,7 +39,7 @@ with open(os.environ['MOCK_LOG'], 'a') as log:
     log.write(json.dumps(entry) + '\n')
 if name != 'hindsight' and not name.endswith('.sh'):
     sys.exit(97)  # Fail closed, including curl and accidental gc/bd/dolt calls.
-print(json.dumps({'content': 'fixture brief', 'results': [], 'items': []}))
+print(json.dumps({'text': 'fixture reflection', 'content': 'fixture brief', 'results': [], 'items': []}))
 print('fixture stderr', file=sys.stderr)
 sys.exit(int(os.environ.get('MOCK_EXIT', '0')))
 '''
@@ -111,7 +115,68 @@ class CommandTest(CommandFixture):
                 self.env["MOCK_EXIT"] = "19"
                 self.wrapper("read", *args, code=19)
                 self.assertEqual(self.calls()[-1], dict(
-                    tool="hindsight", args=args, api="https://fixture.invalid", key="fixture-key"))
+                    tool="hindsight", args=args if prefix else ["-o", "json", *args],
+                    api="https://fixture.invalid", key="fixture-key"))
+
+    def test_captured_reflect_defaults_to_json_and_honors_explicit_formats(self):
+        for prefix in ([], ["-o", "pretty"], ["--output", "yaml"], ["-o", "json"]):
+            with self.subTest(prefix=prefix):
+                args = [*prefix, "memory", "reflect", "fixture bank", "literal $(query); *",
+                        "--budget", "mid"]
+                result = self.wrapper("read", *args)
+                self.assertEqual(self.calls()[-1]["args"], args if prefix else ["-o", "json", *args])
+                self.assertEqual(json.loads(result.stdout)["content"], "fixture brief")
+                self.assertEqual(result.stderr, "fixture stderr\n")
+
+    def test_terminal_read_keeps_pretty_default(self):
+        master, slave = os.openpty()
+        try:
+            args = ["memory", "reflect", "fixture bank", "fixture query"]
+            result = subprocess.run(
+                [str(self.pack / "commands/read/run.sh"), *args], env=self.env, cwd=self.root,
+                stdout=slave, stderr=subprocess.PIPE, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.calls()[-1]["args"], args)
+        finally:
+            os.close(slave)
+            os.close(master)
+
+    def test_installed_cli_reflect_has_no_progress_in_captured_output(self):
+        binary = shutil.which("hindsight")
+        if not binary:
+            self.skipTest("Hindsight CLI not installed")
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                # Give the old CLI's 80ms spinner time to emit several frames.
+                time.sleep(0.3)
+                body = json.dumps({"text": "fixture reflection"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            (self.bin / "hindsight").unlink()
+            (self.bin / "hindsight").symlink_to(binary)
+            self.env["HINDSIGHT_API"] = f"http://127.0.0.1:{server.server_port}"
+            result = self.wrapper("read", "memory", "reflect", "fixture", "fixture query")
+            self.assertEqual(json.loads(result.stdout)["text"], "fixture reflection")
+            self.assertNotIn("\r", result.stdout)
+            self.assertNotIn("\x1b", result.stdout)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_read_rejects_writes_and_unknown_operations_before_dispatch(self):
         for args in (("memory", "retain"), ("-o", "json", "mental-model", "refresh"),
@@ -120,6 +185,37 @@ class CommandTest(CommandFixture):
                 result = self.wrapper("read", *args, code=2)
                 self.assertIn("read operations only", result.stderr)
         self.assertEqual(self.calls(), [])
+
+    def test_memory_skill_reflect_extracts_answer_only_on_success(self):
+        skill = (PACK / "skills/hindsight-memory/SKILL.md").read_text()
+        command = re.search(r"(?ms)^# Task start.*?(?=^# Lookup)", skill).group(0)
+        command = command.replace("repo:<your-rig>", "repo:widgets").replace(
+            "gc hindsight read", shlex.quote(str(self.pack / "commands/read/run.sh")))
+        self.env["BANK"] = "fixture bank"
+        result = self.run_command("bash", "-eu", "-c", command)
+        self.assertEqual(result.stdout, "fixture reflection\n")
+        self.assertEqual(result.stderr, "fixture stderr\n")
+        self.assertEqual(self.calls()[-1]["args"], [
+            "-o", "json", "memory", "reflect", "fixture bank", "<the task, verbatim>",
+            "--tags", "repo:widgets,scope:platform", "--tags-match", "any_strict", "--budget", "mid",
+        ])
+        self.env["MOCK_EXIT"] = "19"
+        result = self.run_command("bash", "-eu", "-c", command, code=19)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "fixture stderr\n")
+
+    def test_published_read_examples_request_json_and_keep_errors_visible(self):
+        for path in ("template-fragments/hindsight.template.md", "skills/hindsight-memory/SKILL.md",
+                     "skills/hindsight-shipping/SKILL.md", "commands/read/help.md",
+                     "formulas/mol-hindsight-consolidate.toml"):
+            with self.subTest(path=path):
+                text = (PACK / path).read_text()
+                commands = re.findall(r"gc hindsight read ([^`\n]+)", text)
+                self.assertTrue(commands)
+                for command in commands:
+                    self.assertTrue(command.startswith("-o json "), command)
+                    self.assertNotIn("2>/dev/null", command)
+                self.assertNotIn("2>/dev/null", text)
 
     def test_writer_commands_require_both_archivist_marker_and_session(self):
         for marker, session in (("", ""), ("archivist", ""), ("worker", "fixture-session")):
@@ -199,16 +295,30 @@ class GasCityCompatibilityTest(CommandFixture):
             self.assertNotIn(unresolved, prompt)
         return prompt
 
+    def reflect_command(self, prompt):
+        command = re.search(
+            r"(?m)^ {4}TMP=\$\(mktemp -d\)\n(?: {4}[^\n]*\n)+", prompt).group(0)
+        self.assertIn("gc hindsight read -o json memory reflect", command)
+        self.assertIn("jq -er '.text'", command)
+        self.assertNotIn("2>/dev/null", command)
+        return command
+
     def test_rendered_rig_brief_dispatches_through_real_gc(self):
         prompt = self.render("widgets/reader")
         self.assertIn("# Fixture reader", prompt)
         self.assertIn("gc mail send hindsight.archivist", prompt)
-        command = re.search(r"(?m)^ {4}(gc hindsight read .*?)$", prompt.replace("\\\n", "")).group(1)
-        self.run_command("bash", "-eu", "-c", command)
+        command = self.reflect_command(prompt)
+        result = self.run_command("bash", "-eu", "-c", command)
+        self.assertEqual(result.stdout, "fixture reflection\n")
+        self.assertEqual(result.stderr, "fixture stderr\n")
         self.assertEqual([c["args"] for c in self.calls()], [[
-            "memory", "reflect", "fixture bank", "<the task, verbatim>",
+            "-o", "json", "memory", "reflect", "fixture bank", "<the task, verbatim>",
             "--tags", "repo:widgets,scope:platform", "--tags-match", "any_strict", "--budget", "mid",
         ]])
+        self.env["MOCK_EXIT"] = "19"
+        result = self.run_command("bash", "-eu", "-c", command, code=19)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "fixture stderr\n")
 
     def test_semantic_lint_preview_dispatches_without_services_or_key(self):
         shutil.copytree(PACK / "schemas", self.pack / "schemas")
@@ -252,14 +362,27 @@ class GasCityCompatibilityTest(CommandFixture):
         config.write_text('[env]\nHINDSIGHT_MEMORY = "1"\nHINDSIGHT_MENTAL_MODELS = "landmines"\n')
         prompt = self.render("reader")
         self.assertNotIn("gc mail send", prompt)
-        command = re.search(r"(?m)^ {4}(gc hindsight read .*?)$", prompt.replace("\\\n", "")).group(1)
-        self.run_command("bash", "-eu", "-c", command.replace("<rig>", "widgets"))
-        self.assertIn("repo:widgets,scope:platform,scope:business", self.calls()[-1]["args"])
-        loop = re.search(r"(?ms)^ {4}TMP=.*?^ {4}done$", prompt).group(0)
-        self.assertEqual(self.run_command("bash", "-eu", "-c", loop).stdout, "fixture brief\n")
+        command = self.reflect_command(prompt).replace("<rig>", "widgets")
+        result = self.run_command("bash", "-eu", "-c", command)
+        self.assertEqual(result.stdout, "fixture reflection\n")
+        self.assertEqual(result.stderr, "fixture stderr\n")
+        self.assertEqual(self.calls()[-1]["args"], [
+            "-o", "json", "memory", "reflect", "fixture bank", "<the ask, verbatim>",
+            "--tags", "repo:widgets,scope:platform,scope:business",
+            "--tags-match", "any_strict", "--budget", "mid",
+        ])
+        loop = re.search(r"(?ms)^ {4}TMP=\$\(mktemp -d\)\n {4}for m .*?^ {4}done$", prompt).group(0)
+        result = self.run_command("bash", "-eu", "-c", loop)
+        self.assertEqual(result.stdout, "fixture brief\n")
+        self.assertEqual(result.stderr, "fixture stderr\n")
         self.assertEqual(self.calls()[-1]["args"], [
             "-o", "json", "mental-model", "get", "fixture bank", "landmines",
         ])
+        self.env["MOCK_EXIT"] = "19"
+        for script in (command, loop):
+            result = self.run_command("bash", "-eu", "-c", script, code=19)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(result.stderr, "fixture stderr\n")
         config.write_text("")
         prompt = self.render("reader")
         self.assertIn("# Fixture reader", prompt)

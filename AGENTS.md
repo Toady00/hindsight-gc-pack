@@ -1,5 +1,29 @@
 # Review Pitfalls
 
+- Installed Hindsight CLI `0.9.1` animates pretty-mode progress on stdout,
+  including captured output: reflect can flood agent logs with `Reflecting...`
+  and ANSI fragments. JSON mode skips the spinner. The read adapter now defaults
+  to JSON when stdout is not a terminal, while preserving explicit leading
+  `-o` / `--output` choices and interactive pretty output. Do not suppress stderr
+  or filter spinner text out of responses; that can hide errors or answer text.
+  Agent-facing reflect examples must explicitly request JSON and extract `.text`
+  only after success: agent tools can allocate a PTY, bypassing the non-TTY default.
+  Check both rig and coordinator branches of the rendered `hindsight-brief`.
+  Command fixtures must run subprocesses from their temporary root, including
+  PTY tests: running from the checkout with a temporary HOME can make mise reject
+  the parent project's config as untrusted before the CLI runs.
+
+- Hindsight CLI `0.9.1`'s `bank consolidate --wait` searches only the first
+  operations page and treats a missing operation as success. JSON mode also
+  exits 1 on terminal failure without printing the error. Maintenance now
+  submits in JSON and polls the returned operation ID with visible errors and
+  a configurable wait limit. Only a confirmed terminal failure gets recovery
+  and one retry. A timeout or uncertain submission/status must not cause blind
+  resubmission: processing consolidations are not deduplicated by the server.
+  Bash `SECONDS` has whole-second resolution: a one-second polling fixture can
+  time out on its first read when it crosses a tick. Give wait-path tests enough
+  headroom to reach their second poll.
+
 - Pack commands work from rig directories, but an external/sibling checkout
   needs importing-city context: `GC_CITY=/absolute/path/to/city gc hindsight ...`.
   Verified with real gc dispatch in nested and external fixture directories.

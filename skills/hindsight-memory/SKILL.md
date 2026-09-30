@@ -10,6 +10,12 @@ the workspace level). This skill is the working subset of the read-side
 patterns. The supported v1 import binding is `hindsight`; use
 `gc hindsight read` even when your agent belongs to another pack.
 
+Pass `-o json` before the operation on every read command, including each
+command joined with `&&`. Older CLIs animate pretty output even when captured,
+flooding agent logs with `Reflecting...`. Save JSON, then extract the answer
+field only after the command succeeds. Keep stderr visible; a failed read is
+not an empty result.
+
 ```bash
 BANK="${HINDSIGHT_BANK:?HINDSIGHT_BANK not set — declare it in [workspace] env}"
 ```
@@ -30,23 +36,26 @@ BANK="${HINDSIGHT_BANK:?HINDSIGHT_BANK not set — declare it in [workspace] env
 
 ```bash
 # Task start — your rig name IS your repo tag
-gc hindsight read memory reflect "$BANK" "<the task, verbatim>" \
-  --tags repo:<your-rig>,scope:platform --tags-match any_strict --budget mid
+TMP=$(mktemp -d)
+gc hindsight read -o json memory reflect "$BANK" "<the task, verbatim>" \
+  --tags repo:<your-rig>,scope:platform --tags-match any_strict --budget mid > "$TMP/reflect.json" &&
+  jq -er '.text' "$TMP/reflect.json"
 
 # Lookup — redirect, then extract; never dump raw output into context
 TMP=$(mktemp -d)
 gc hindsight read -o json memory recall "$BANK" "<question>" \
   --tags repo:<your-rig>,scope:platform --tags-match any_strict \
-  --budget low --max-tokens 2048 > "$TMP/r.json" 2>/dev/null
-jq -r '.results[]? | .text' "$TMP/r.json"
+  --budget low --max-tokens 2048 > "$TMP/r.json" &&
+  jq -r '.results[]? | .text' "$TMP/r.json"
 ```
 
 **Before writing code in an unfamiliar rig**, fetch
 `conventions-and-standards` and `landmines`:
 
 ```bash
-gc hindsight read -o json mental-model get "$BANK" conventions-and-standards > "$TMP/m.json" 2>/dev/null
-jq -r '.content' "$TMP/m.json"   # take .content, never the whole object
+TMP=$(mktemp -d)
+gc hindsight read -o json mental-model get "$BANK" conventions-and-standards > "$TMP/m.json" &&
+  jq -er '.content' "$TMP/m.json"   # take .content, never the whole object
 ```
 
 Other standing models: `platform-architecture-and-service-map`,

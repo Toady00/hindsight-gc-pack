@@ -65,8 +65,30 @@ elif tool == "gc" and args[:1] == ["sling"]:
         sys.exit(1)
     result = "queued fixture-bead"
 elif tool == "hindsight":
+    assert args[:2] == ["-o", "json"]
     if args[2:4] == ["document", "get"]:
         result = config["document"]  # An unexpected bump read must fail.
+    elif args[2:4] == ["bank", "consolidate"]:
+        assert "--wait" not in args
+        if config.get("consolidate_error"):
+            print("fixture consolidation submission error", file=sys.stderr)
+            sys.exit(1)
+        calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
+        count = sum(c["tool"] == "hindsight" and c["args"][2:4] == ["bank", "consolidate"] for c in calls)
+        result = config.get("consolidation_response", {"operation_id": f"consolidate-op-{count}"})
+    elif args[2:4] == ["bank", "consolidation-recover"]:
+        result = {"retried_count": 0}
+    elif args[2:4] == ["operation", "get"]:
+        calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
+        index = sum(c["tool"] == "hindsight" and c["args"][2:4] == ["operation", "get"] for c in calls) - 1
+        statuses = config.get("consolidation_statuses", ["completed"])
+        status = statuses[min(index, len(statuses) - 1)]
+        if status == "read_error":
+            print("fixture operation read error", file=sys.stderr)
+            sys.exit(1)
+        result = {"operation_id": args[5], "status": status}
+        if status == "failed":
+            result["error_message"] = "fixture consolidation failure"
     elif args[2:4] == ["bank", "config"]:
         result = {"config": {"enable_auto_consolidation": config.get("auto", True)}}
     elif args[2:4] == ["tag", "list"]:

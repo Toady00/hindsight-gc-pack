@@ -48,9 +48,12 @@ re-derive its steps by hand:
   as stuck. Bank-wide waiting does not invalidate successful document receipts
   or justify repeating document reprocessing.
 - 5: operation state or audit inventory could not be read reliably. Record
-  the failure and mail the mayor; never report this as a clean night.
-- 4: consolidation failed after recover+retry. Mail the mayor with the
-  error output. Do not loop.
+  the failure and mail the mayor; never report this as a clean night. An
+  uncertain consolidation submission or status is not automatically retried.
+- 4: consolidation failed after recover+retry, or the operation exceeded its
+  wait limit. A timed-out operation may still be running and was not retried.
+  Mail the mayor with the error output and operation ID. Inspect its status
+  before considering another attempt. Do not loop.
 
 ## 2. Model audit
 

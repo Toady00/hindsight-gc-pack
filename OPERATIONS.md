@@ -57,6 +57,17 @@ config for another endpoint. Both HTTP and CLI requests use the resulting
 endpoint and credential. HTTP auth travels over stdin to curl. Task requests
 and health reports contain no credentials. For standalone read calls, use
 `gc hindsight read` with the ordinary CLI read arguments.
+For agent reads, put `-o json` before the operation on every command and
+extract reflect's `.text` after success. Keep stderr visible. The shared
+`hindsight-brief` fragment and `hindsight-memory` skill provide these patterns;
+city or pack specializations that override the fragment should use them too.
+
+Maintenance submits consolidation in JSON and polls the returned operation ID,
+avoiding the older CLI's paged `--wait` lookup and hidden JSON-mode failure
+details. `--consolidate-timeout` bounds each operation's wait, defaulting to
+900 seconds. A confirmed terminal failure gets one recover-and-retry attempt.
+Timeouts return 4; uncertain submissions or unreadable status return 5. Neither
+is automatically retried, because the original operation may still be running.
 
 Runtime dependencies are Bash, Git, curl with `--fail-with-body`, jq, Mike
 Farah's yq, Python 3.11 or newer, Hindsight CLI, and Gas City. Python's standard

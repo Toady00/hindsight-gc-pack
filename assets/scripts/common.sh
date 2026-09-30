@@ -59,16 +59,20 @@ hs_drain() {
 }
 
 hs_wait_terminal() {
-  local op="$1" response st i
-  for i in $(seq 1 90); do
+  local op="$1" timeout="${2:-900}" response st remaining
+  local deadline=$((SECONDS + timeout))
+  while :; do
     response="$(hindsight -o json operation get "$BANK" "$op")" || return 5
     st="$(jq -er '.status | select(type == "string")' <<<"$response")" || return 5
     case "$st" in
-      pending|processing) sleep 10 ;;
+      pending|processing)
+        remaining=$((deadline - SECONDS))
+        if (( remaining <= 0 )); then echo timeout; return 0; fi
+        (( remaining > 10 )) && remaining=10
+        sleep "$remaining" ;;
       completed) echo completed; return 0 ;;
       failed|cancelled|canceled) jq -r '.error_message // "operation failed"' <<<"$response" >&2; echo "$st"; return 0 ;;
       *) echo "unknown operation status: $st" >&2; return 5 ;;
     esac
   done
-  echo timeout
 }
