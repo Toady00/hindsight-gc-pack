@@ -47,9 +47,15 @@ re-derive its steps by hand:
   Inspect the reported operation IDs and live progress before describing work
   as stuck. Bank-wide waiting does not invalidate successful document receipts
   or justify repeating document reprocessing.
-- 5: operation state or audit inventory could not be read reliably. Record
-  the failure and mail the mayor; never report this as a clean night. An
-  uncertain consolidation submission or status is not automatically retried.
+- 5: operation state or audit inventory could not be read reliably,
+  consolidation submission is uncertain, or recovery failed. Record the
+  failure and mail the mayor; never report this as a clean night. The script
+  already retries transient reads with bounded backoff and retries submission
+  only for DNS or connection-establishment failures that prove no connection
+  was made. An ambiguous submission is never automatically resubmitted, and
+  failed recovery stops before another submission. Do not rerun maintenance
+  merely because the API becomes reachable again; inspect the reported state
+  and operation ID first.
 - 4: consolidation failed after recover+retry, or the operation exceeded its
   wait limit. A timed-out operation may still be running and was not retried.
   Mail the mayor with the error output and operation ID. Inspect its status
