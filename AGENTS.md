@@ -15,14 +15,23 @@
 
 - Hindsight CLI `0.9.1`'s `bank consolidate --wait` searches only the first
   operations page and treats a missing operation as success. JSON mode also
-  exits 1 on terminal failure without printing the error. Maintenance now
-  submits in JSON and polls the returned operation ID with visible errors and
-  a configurable wait limit. Only a confirmed terminal failure gets recovery
-  and one retry. A timeout or uncertain submission/status must not cause blind
-  resubmission: processing consolidations are not deduplicated by the server.
+  exits 1 on terminal failure without printing the error. Maintenance bypasses
+  those CLI paths, submits over HTTP, and polls the returned operation ID with
+  visible errors and a configurable wait limit. Only a confirmed terminal
+  failure gets recovery and one retry. A timeout or uncertain submission/status
+  must not cause blind resubmission: only pending full-bank runs are deduplicated.
   Bash `SECONDS` has whole-second resolution: a one-second polling fixture can
   time out on its first read when it crosses a tick. Give wait-path tests enough
   headroom to reach their second poll.
+
+- Maintenance submits full-bank consolidation over HTTP. Only curl DNS errors
+  and connection-establishment refusal (codes 5/6/7) prove no connection was
+  made and may be retried. A timeout/reset can occur after delivery and must
+  remain uncertain; do not broaden POST retry classes based on server version.
+  The matching upstream source currently deduplicates only pending full-bank
+  operations; processing runs and recovery are not a general idempotency key.
+  Retry reads with bounded backoff, but never turn failed config reads into
+  apparent config drift or failed recovery into another consolidation submit.
 
 - Pack commands work from rig directories, but an external/sibling checkout
   needs importing-city context: `GC_CITY=/absolute/path/to/city gc hindsight ...`.

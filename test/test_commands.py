@@ -231,7 +231,12 @@ class CommandTest(CommandFixture):
         self.writer()
         self.wrapper("maintain", code=5)
         self.wrapper("retain", "--id", "gotcha.fixture", code=5)
-        self.assertEqual([c["tool"] for c in self.calls()], ["curl"] * 3)
+        calls = self.calls()
+        self.assertTrue(calls)
+        self.assertTrue(all(call["tool"] == "curl" for call in calls))
+        # The three unavailable read requests each exhaust the four-attempt
+        # transient-read budget; no read falls back to the CLI.
+        self.assertEqual(len(calls), 12)
 
 
 class GasCityCompatibilityTest(CommandFixture):

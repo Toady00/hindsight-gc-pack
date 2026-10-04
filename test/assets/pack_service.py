@@ -77,6 +77,9 @@ elif tool == "hindsight":
         count = sum(c["tool"] == "hindsight" and c["args"][2:4] == ["bank", "consolidate"] for c in calls)
         result = config.get("consolidation_response", {"operation_id": f"consolidate-op-{count}"})
     elif args[2:4] == ["bank", "consolidation-recover"]:
+        if config.get("recovery_error"):
+            print("fixture recovery error", file=sys.stderr)
+            sys.exit(1)
         result = {"retried_count": 0}
     elif args[2:4] == ["operation", "get"]:
         calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
@@ -90,6 +93,9 @@ elif tool == "hindsight":
         if status == "failed":
             result["error_message"] = "fixture consolidation failure"
     elif args[2:4] == ["bank", "config"]:
+        if config.get("config_error"):
+            print("fixture config error", file=sys.stderr)
+            sys.exit(1)
         result = {"config": {"enable_auto_consolidation": config.get("auto", True)}}
     elif args[2:4] == ["tag", "list"]:
         tags = config.get("tags", [])
@@ -101,10 +107,68 @@ elif tool == "curl":
     server = json.loads((root / "server.json").read_text())
     url = urlsplit(next(a for a in args if a.startswith("http")))
     path = unquote(url.path)
+    query = parse_qs(url.query)
+    method = args[args.index("--request") + 1] if "--request" in args else "GET"
     if path == "/openapi.json":
         result = {"components": {"schemas": {"RetainRequest": {"properties": {"operation_id": {}, "async": {"type": "boolean"}}}}}}
+    elif path.endswith("/consolidate") and method == "POST":
+        attempts_file = root / "consolidation-connect-attempts"
+        attempts = int(attempts_file.read_text()) if attempts_file.exists() else 0
+        attempts_file.write_text(str(attempts + 1))
+        if attempts < config.get("consolidate_connect_failures", 0):
+            print("connection refused", file=sys.stderr)
+            sys.exit(7)
+        if config.get("consolidate_error"):
+            print("fixture consolidation submission error", file=sys.stderr)
+            sys.exit(config.get("consolidate_error_code", 28))
+        count_file = root / "consolidation-count"
+        count = int(count_file.read_text()) + 1 if count_file.exists() else 1
+        count_file.write_text(str(count))
+        result = config.get("consolidation_response", {"operation_id": f"consolidate-op-{count}"})
+    elif path.endswith("/config"):
+        if config.get("config_error"):
+            print("fixture config error", file=sys.stderr)
+            sys.exit(7)
+        result = {"config": {"enable_auto_consolidation": config.get("auto", True)}}
+    elif path.endswith("/tags"):
+        if config.get("tag_error"):
+            print("fixture tag error", file=sys.stderr)
+            sys.exit(7)
+        tags = config.get("tags", [])
+        offset, limit = int(query.get("offset", [0])[0]), int(query.get("limit", [500])[0])
+        result = {"items": [{"tag": tag} for tag in tags[offset:offset + limit]], "total": len(tags)}
+    elif path.endswith("/retry"):
+        op = path.split("/")[-2]
+        server["operations"][op]["status"] = "completed"
+        result = {"operation_id": op, "success": True}
     elif path.endswith("/operations"):
         result = {"operations": [], "total": 0}
+    elif "/operations/" in path:
+        operation_id = path.split("/")[-1]
+        if operation_id in server["operations"]:
+            result = server["operations"][operation_id]
+        else:
+            count_file = root / "operation-poll-count"
+            index = int(count_file.read_text()) if count_file.exists() else 0
+            count_file.write_text(str(index + 1))
+            statuses = config.get("consolidation_statuses", ["completed"])
+            status = statuses[min(index, len(statuses) - 1)]
+            if status in ("read_error", "not_found", None):
+                print("fixture operation read error", file=sys.stderr)
+            if status == "unauthorized":
+                import time
+                time.sleep(config.get("operation_status_delay", 0))
+                print("401", end="")
+                print("fixture unauthorized status read", file=sys.stderr)
+                sys.exit(22)
+            if status in ("not_found", None) and "--write-out" in args:
+                print("404", end="")
+                sys.exit(22)
+            if status == "read_error":
+                sys.exit(7)
+            result = {"operation_id": operation_id, "status": status}
+            if status == "failed":
+                result["error_message"] = "fixture consolidation failure"
     elif path.endswith("/memories"):
         payload = entry["payload"]
         op = payload["operation_id"]
@@ -113,14 +177,7 @@ elif tool == "curl":
         server["documents"] = [dict(id=i["document_id"], content=i["content"], tags=i["tags"],
                                     document_metadata=i["metadata"]) for i in payload["items"]]
         result = {"operation_id": op}
-    elif path.endswith("/retry"):
-        op = path.split("/")[-2]
-        server["operations"][op]["status"] = "completed"
-        result = {"operation_id": op, "success": True}
-    elif "/operations/" in path:
-        result = server["operations"][path.split("/")[-1]]
     elif path.endswith("/documents"):
-        query = parse_qs(url.query)
         offset, limit = int(query["offset"][0]), int(query["limit"][0])
         result = {"items": server["documents"][offset:offset + limit], "total": len(server["documents"])}
     else:
@@ -128,4 +185,10 @@ elif tool == "curl":
     (root / "server.json").write_text(json.dumps(server))
 else:
     raise AssertionError((tool, args))
-print(json.dumps(result))
+payload = json.dumps(result)
+if "--output" in args:
+    Path(value("--output")).write_text(payload)
+else:
+    print(payload)
+if "--write-out" in args:
+    print("200", end="")

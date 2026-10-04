@@ -62,12 +62,19 @@ extract reflect's `.text` after success. Keep stderr visible. The shared
 `hindsight-brief` fragment and `hindsight-memory` skill provide these patterns;
 city or pack specializations that override the fragment should use them too.
 
-Maintenance submits consolidation in JSON and polls the returned operation ID,
-avoiding the older CLI's paged `--wait` lookup and hidden JSON-mode failure
-details. `--consolidate-timeout` bounds each operation's wait, defaulting to
-900 seconds. A confirmed terminal failure gets one recover-and-retry attempt.
-Timeouts return 4; uncertain submissions or unreadable status return 5. Neither
-is automatically retried, because the original operation may still be running.
+Maintenance submits consolidation directly over HTTP and polls the returned
+operation ID, avoiding the CLI's paged `--wait` lookup and hidden JSON-mode
+failure details. Idempotent reads have bounded retries and backoff. Submission
+retries only DNS resolution and connection-establishment errors, which prove no
+API connection was made; timeouts, resets, HTTP errors, and malformed
+acknowledgements are uncertain and fail closed without resubmitting. A confirmed
+terminal failure gets one recovery call, followed by one submit only when
+recovery succeeds. Recovery itself is never retried automatically. Each
+operation wait is bounded by `--consolidate-timeout` (900 seconds by default).
+Status-read timeouts and backoff are capped to the remaining wait budget. A
+zero-second limit still performs one initial status read, with the normal
+20-second request cap. Timeouts return 4; uncertain submissions, unreadable
+state, and failed recovery return 5.
 
 Runtime dependencies are Bash, Git, curl with `--fail-with-body`, jq, Mike
 Farah's yq, Python 3.11 or newer, Hindsight CLI, and Gas City. Python's standard

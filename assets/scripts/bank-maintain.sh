@@ -28,7 +28,7 @@
 #   2  consolidated fine, but the tag audit has findings (report on stdout)
 #   3  drain timeout — operations still in flight; consolidation was NOT run
 #   4  consolidation failed after recover+retry, or timed out without retry
-#   5  operation state or audit inventory could not be read reliably
+#   5  operation state/audit inventory unavailable, uncertain submit, or recovery failed
 #
 # Tag audit checks (all deterministic):
 #   a. axis check      every tag starts with a schema-declared axis
@@ -94,8 +94,9 @@ echo "drained: no operations in flight"
 # then poll the specific operation with visible errors and a bounded wait.
 consolidate_once() {
   local op state
-  hindsight -o json bank consolidate "$BANK" > "$TMP/consolidate.json" || {
-    echo "CONSOLIDATION STATE UNKNOWN: trigger failed; not automatically retried" >&2
+  HS_HTTP_BODY="$TMP/consolidate.body" HS_HTTP_ERROR="$TMP/consolidate.error"
+  hs_http_post_consolidate "$API/v1/default/banks/$BANK_PATH/consolidate" > "$TMP/consolidate.json" || {
+    echo "CONSOLIDATION STATE UNKNOWN: trigger failed; delivery may be ambiguous; not automatically retried" >&2
     return 5
   }
   op="$(jq -er '.operation_id | select(type == "string" and length > 0)' "$TMP/consolidate.json")" || {
@@ -107,7 +108,7 @@ consolidate_once() {
   case "$state" in
     completed) return 0 ;;
     timeout)
-      echo "CONSOLIDATION TIMEOUT: operation $op still in flight; not retried" >&2
+      echo "CONSOLIDATION TIMEOUT: operation $op was last confirmed in flight; status is unconfirmed at the deadline" >&2
       return 6 ;;
     *) echo "consolidation $op $state" >&2; return 1 ;;
   esac
@@ -118,7 +119,10 @@ if ! $SKIP_CONSOLIDATE; then
   rc=0; consolidate_once || rc=$?
   if [[ "$rc" -eq 1 ]]; then
     echo "consolidation failed; attempting recover + one retry" >&2
-    hindsight -o json bank consolidation-recover "$BANK" > "$TMP/recover.json" || true
+    if ! hindsight -o json bank consolidation-recover "$BANK" > "$TMP/recover.json"; then
+      echo "CONSOLIDATION RECOVERY FAILED: not retrying consolidation" >&2
+      exit 5
+    fi
     rc=0; consolidate_once || rc=$?
   fi
   case "$rc" in
@@ -133,7 +137,17 @@ fi
 # Bulk loads may deliberately disable auto-consolidation, and a
 # crashed load's trap never fires. This catches the drift within a day.
 echo "== config drift =="
-hindsight -o json bank config "$BANK" > "$TMP/cfg.json" 2>/dev/null || echo '{}' > "$TMP/cfg.json"
+HS_HTTP_BODY="$TMP/config.body" HS_HTTP_ERROR="$TMP/config.error"
+if ! hs_http_read "$API/v1/default/banks/$BANK_PATH/config" > "$TMP/cfg.json"; then
+  rm -f "$HS_HTTP_BODY" "$HS_HTTP_ERROR"
+  echo "CONFIG AUDIT FAILED: could not read bank configuration" >&2
+  exit 5
+fi
+rm -f "$HS_HTTP_BODY" "$HS_HTTP_ERROR"
+jq -e '.config | type == "object"' "$TMP/cfg.json" >/dev/null || {
+  echo "CONFIG AUDIT FAILED: bank configuration response is invalid" >&2
+  exit 5
+}
 AUTOC="$(jq -r 'if .config | has("enable_auto_consolidation") then .config.enable_auto_consolidation else "unknown" end' "$TMP/cfg.json")"
 if [[ "$AUTOC" != "true" ]]; then
   echo "CONFIG-DRIFT  enable_auto_consolidation=$AUTOC (expected true — a bulk load may have died before re-enabling it)" >> "$TMP/findings.txt.pre"
@@ -147,7 +161,13 @@ echo "== tag audit =="
 echo '[]' > "$TMP/tag-items.json"
 offset=0
 while :; do
-  hindsight -o json tag list "$BANK" --limit 500 --offset "$offset" > "$TMP/tags-page.json" || exit 5
+  HS_HTTP_BODY="$TMP/tags.body" HS_HTTP_ERROR="$TMP/tags.error"
+  if ! hs_http_read "$API/v1/default/banks/$BANK_PATH/tags?limit=500&offset=$offset" > "$TMP/tags-page.json"; then
+    rm -f "$HS_HTTP_BODY" "$HS_HTTP_ERROR"
+    echo "TAG AUDIT FAILED: could not read tag inventory at offset $offset" >&2
+    exit 5
+  fi
+  rm -f "$HS_HTTP_BODY" "$HS_HTTP_ERROR"
   jq -e '.items | type == "array" and all(.[]; .tag | type == "string")' "$TMP/tags-page.json" >/dev/null || exit 5
   count="$(jq '.items | length' "$TMP/tags-page.json")"
   jq -s '.[0] + .[1].items' "$TMP/tag-items.json" "$TMP/tags-page.json" > "$TMP/tag-merged.json"

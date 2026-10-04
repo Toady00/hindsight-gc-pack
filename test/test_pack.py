@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from urllib.parse import urlsplit
 from unittest.mock import Mock, patch
 
 try:
@@ -367,6 +368,11 @@ class RequestAndDiscoveryTest(unittest.TestCase):
 
 
 class PackShellTest(ShellFixture):
+    def maintenance_requests(self, suffix):
+        return [call for call in self.calls("curl") if any(
+            arg.startswith("http") and (suffix in arg if suffix.endswith("/") else arg.split("?", 1)[0].endswith(suffix))
+            for arg in call["args"])]
+
     def test_ship_happy_path_and_shared_receipt_skip(self):
         docs = self.published_docs()
         self.env["HINDSIGHT_API_KEY"] = "fixture-secret"
@@ -442,7 +448,9 @@ class PackShellTest(ShellFixture):
         result = self.run_script(SCRIPTS / "bank-maintain.sh", "--skip-consolidate", code=2)
         self.assertIn("UNKNOWN-RIG   repo:unknown", result.stdout)
         self.assertIn("enable_auto_consolidation=false", result.stdout)
-        self.assertEqual([c["args"][-1] for c in self.calls("hindsight") if "tag" in c["args"]], ["0", "500"])
+        tag_queries = [urlsplit(next(a for a in call["args"] if a.startswith("http"))).query
+                       for call in self.maintenance_requests("/tags")]
+        self.assertEqual(tag_queries, ["limit=500&offset=0", "limit=500&offset=500"])
 
     def test_empty_audit_and_unavailable_registry(self):
         self.run_script(SCRIPTS / "bank-maintain.sh", "--skip-consolidate")
@@ -452,15 +460,15 @@ class PackShellTest(ShellFixture):
 
     def test_consolidation_polls_specific_operation_without_animated_output(self):
         result = self.run_script(SCRIPTS / "bank-maintain.sh")
-        self.assertEqual([c["args"] for c in self.calls("hindsight")][:2], [
-            ["-o", "json", "bank", "consolidate", "fixture"],
-            ["-o", "json", "operation", "get", "fixture", "consolidate-op-1"],
-        ])
+        self.assertEqual(len(self.maintenance_requests("/consolidate")), 1)
+        poll = self.maintenance_requests("/operations/consolidate-op-1")
+        self.assertEqual(len(poll), 1)
+        self.assertIn("--request", self.maintenance_requests("/consolidate")[0]["args"])
         self.assertIn("consolidation operation: consolidate-op-1", result.stdout)
         self.assertIn("consolidate=ok", result.stdout)
         self.assertNotIn("\r", result.stdout)
         self.assertNotIn("\x1b", result.stdout)
-        self.assertTrue(all(c["args"][:2] == ["-o", "json"] for c in self.calls("hindsight")))
+        self.assertFalse([call for call in self.calls("hindsight") if call["args"][2:4] == ["bank", "consolidate"]])
 
     def test_consolidation_recovers_once_after_confirmed_failure(self):
         self.config["consolidation_statuses"] = ["failed", "completed"]
@@ -468,13 +476,11 @@ class PackShellTest(ShellFixture):
         self.assertIn("fixture consolidation failure", result.stderr)
         self.assertIn("attempting recover + one retry", result.stderr)
         self.assertIn("consolidate=ok", result.stdout)
-        self.assertEqual([c["args"] for c in self.calls("hindsight")][:5], [
-            ["-o", "json", "bank", "consolidate", "fixture"],
-            ["-o", "json", "operation", "get", "fixture", "consolidate-op-1"],
-            ["-o", "json", "bank", "consolidation-recover", "fixture"],
-            ["-o", "json", "bank", "consolidate", "fixture"],
-            ["-o", "json", "operation", "get", "fixture", "consolidate-op-2"],
-        ])
+        self.assertEqual(len(self.maintenance_requests("/consolidate")), 2)
+        self.assertEqual(len(self.maintenance_requests("/operations/consolidate-op-1")), 1)
+        self.assertEqual(len(self.maintenance_requests("/operations/consolidate-op-2")), 1)
+        self.assertEqual([call["args"][2:4] for call in self.calls("hindsight")], [
+            ["bank", "consolidation-recover"]])
 
     def test_consolidation_finishes_after_waiting(self):
         self.config["consolidation_statuses"] = ["processing", "completed"]
@@ -482,11 +488,11 @@ class PackShellTest(ShellFixture):
         # status read to cross a tick before testing the wait-and-poll path.
         result = self.run_script(SCRIPTS / "bank-maintain.sh", "--consolidate-timeout", "2")
         self.assertIn("consolidate=ok", result.stdout)
-        self.assertEqual([c["args"] for c in self.calls("hindsight")][:3], [
-            ["-o", "json", "bank", "consolidate", "fixture"],
-            ["-o", "json", "operation", "get", "fixture", "consolidate-op-1"],
-            ["-o", "json", "operation", "get", "fixture", "consolidate-op-1"],
-        ])
+        self.assertEqual(len(self.maintenance_requests("/consolidate")), 1)
+        polls = self.maintenance_requests("/operations/consolidate-op-1")
+        self.assertEqual(len(polls), 2)
+        first_poll_args = polls[0]["args"]
+        self.assertLessEqual(int(first_poll_args[first_poll_args.index("--max-time") + 1]), 1)
         self.assertNotIn("attempting recover", result.stderr)
 
     def test_consolidation_second_failure_stops_before_audit(self):
@@ -494,20 +500,26 @@ class PackShellTest(ShellFixture):
         result = self.run_script(SCRIPTS / "bank-maintain.sh", code=4)
         self.assertIn("fixture consolidation failure", result.stderr)
         self.assertIn("CONSOLIDATION FAILED after recover+retry", result.stderr)
-        self.assertEqual(len(self.calls("hindsight")), 5)
+        self.assertEqual(len(self.calls("hindsight")), 1)
+        self.assertEqual(len(self.maintenance_requests("/consolidate")), 2)
         self.assertNotIn("== tag audit ==", result.stdout)
 
     def test_consolidation_unreadable_or_missing_operation_is_not_retried(self):
         for status in ("read_error", "not_found", None):
             with self.subTest(status=status):
                 before = len(self.calls("hindsight"))
+                before_submits = len(self.maintenance_requests("/consolidate"))
+                before_polls = len(self.maintenance_requests("/operations/"))
                 self.config["consolidation_statuses"] = [status]
                 result = self.run_script(SCRIPTS / "bank-maintain.sh", code=5)
                 self.assertIn("CONSOLIDATION STATE UNKNOWN", result.stderr)
                 if status == "read_error":
                     self.assertIn("fixture operation read error", result.stderr)
                 calls = self.calls("hindsight")[before:]
-                self.assertEqual([c["args"][2:4] for c in calls], [["bank", "consolidate"], ["operation", "get"]])
+                self.assertFalse(calls)
+                self.assertEqual(len(self.maintenance_requests("/consolidate")) - before_submits, 1)
+                poll_attempts = len(self.maintenance_requests("/operations/")) - before_polls
+                self.assertEqual(poll_attempts, 4 if status == "read_error" else 1)
                 self.assertNotIn("== tag audit ==", result.stdout)
 
     def test_consolidation_uncertain_submission_is_not_retried(self):
@@ -515,25 +527,67 @@ class PackShellTest(ShellFixture):
         result = self.run_script(SCRIPTS / "bank-maintain.sh", code=5)
         self.assertIn("fixture consolidation submission error", result.stderr)
         self.assertIn("not automatically retried", result.stderr)
-        self.assertEqual(len(self.calls("hindsight")), 1)
+        self.assertEqual(len(self.calls("hindsight")), 0)
+        self.assertEqual(len(self.maintenance_requests("/consolidate")), 1)
+
+    def test_connection_refusal_retries_submission_before_delivery(self):
+        self.config["consolidate_connect_failures"] = 1
+        result = self.run_script(SCRIPTS / "bank-maintain.sh")
+        self.assertIn("consolidation operation: consolidate-op-1", result.stdout)
+        self.assertEqual(len(self.maintenance_requests("/consolidate")), 2)
+        self.assertEqual(len(self.maintenance_requests("/operations/consolidate-op-1")), 1)
+
+    def test_failed_recovery_never_submits_a_second_consolidation(self):
+        self.config.update(consolidation_statuses=["failed"], recovery_error=True)
+        result = self.run_script(SCRIPTS / "bank-maintain.sh", code=5)
+        self.assertIn("CONSOLIDATION RECOVERY FAILED", result.stderr)
+        self.assertIn("fixture recovery error", result.stderr)
+        self.assertEqual(len(self.maintenance_requests("/consolidate")), 1)
+        self.assertEqual([call["args"][2:4] for call in self.calls("hindsight")], [
+            ["bank", "consolidation-recover"]])
+
+    def test_config_read_failure_is_not_reported_as_config_drift(self):
+        self.config["config_error"] = True
+        result = self.run_script(SCRIPTS / "bank-maintain.sh", "--skip-consolidate", code=5)
+        self.assertIn("CONFIG AUDIT FAILED", result.stderr)
+        self.assertNotIn("CONFIG-DRIFT", result.stdout)
+        self.assertEqual(len(self.maintenance_requests("/config")), 4)
+
+    def test_tag_inventory_read_failure_is_reported_incomplete(self):
+        self.config["tag_error"] = True
+        result = self.run_script(SCRIPTS / "bank-maintain.sh", "--skip-consolidate", code=5)
+        self.assertIn("TAG AUDIT FAILED", result.stderr)
+        self.assertEqual(len(self.maintenance_requests("/tags")), 4)
 
     def test_consolidation_missing_operation_id_is_not_retried(self):
         for response in ({}, {"operation_id": None}, {"operation_id": ""}, {"operation_id": 42}):
             with self.subTest(response=response):
                 before = len(self.calls("hindsight"))
+                before_submits = len(self.maintenance_requests("/consolidate"))
                 self.config["consolidation_response"] = response
                 result = self.run_script(SCRIPTS / "bank-maintain.sh", code=5)
                 self.assertIn("trigger returned no operation id", result.stderr)
-                self.assertEqual(len(self.calls("hindsight")) - before, 1)
+                self.assertEqual(len(self.calls("hindsight")) - before, 0)
+                self.assertEqual(len(self.maintenance_requests("/consolidate")) - before_submits, 1)
 
     def test_consolidation_timeout_does_not_recover_or_resubmit(self):
         self.config["consolidation_statuses"] = ["processing"]
         result = self.run_script(SCRIPTS / "bank-maintain.sh", "--consolidate-timeout", "0", code=4)
-        self.assertIn("CONSOLIDATION TIMEOUT: operation consolidate-op-1 still in flight; not retried", result.stderr)
-        self.assertEqual([c["args"][2:4] for c in self.calls("hindsight")], [
-            ["bank", "consolidate"], ["operation", "get"],
-        ])
+        self.assertIn("CONSOLIDATION TIMEOUT: operation consolidate-op-1 was last confirmed in flight; status is unconfirmed at the deadline", result.stderr)
+        self.assertEqual(len(self.maintenance_requests("/consolidate")), 1)
+        polls = self.maintenance_requests("/operations/consolidate-op-1")
+        self.assertEqual(len(polls), 1)
+        first_poll_args = polls[0]["args"]
+        self.assertEqual(first_poll_args[first_poll_args.index("--max-time") + 1], "20")
         self.assertNotIn("== tag audit ==", result.stdout)
+
+    def test_delayed_unauthorized_read_after_processing_is_unknown_not_timeout(self):
+        self.config.update(consolidation_statuses=["processing", "unauthorized"], operation_status_delay=1.5)
+        result = self.run_script(SCRIPTS / "bank-maintain.sh", "--consolidate-timeout", "4", code=5)
+        self.assertIn("fixture unauthorized status read", result.stderr)
+        self.assertIn("operation status read failed for consolidate-op-1", result.stderr)
+        self.assertNotIn("CONSOLIDATION TIMEOUT", result.stderr)
+        self.assertEqual(len(self.maintenance_requests("/operations/consolidate-op-1")), 2)
 
     def test_invalid_consolidation_timeout_is_rejected_before_submission(self):
         self.run_script(SCRIPTS / "bank-maintain.sh", "--consolidate-timeout", "invalid", code=64)
