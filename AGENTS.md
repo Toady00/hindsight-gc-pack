@@ -254,3 +254,14 @@
   Keep testing persisted descriptions and command dispatch, not just exit codes;
   older builds silently used defaults. The suite now checks both the override
   and default PR publication.
+
+- Publication lifecycle constraints (2026-10 design): Hindsight v0.10.x has no
+  multi-document transaction. Retain is per document and streaming; document
+  transfer import commits per document; tag PATCH is per document and requeues
+  consolidation. `DELETE /documents/{id}` is synchronous and also deletes
+  derived observations, which is what makes the withdraw → documents → reports
+  set order sound. Do not describe set publication as atomic. Mike Farah yq
+  emits duplicate YAML keys verbatim and JSON readers keep the last one, so the
+  schema parses with a duplicate-rejecting hook; never relax that, or a second
+  `status:` line could ride the fingerprint exemption. Unquoted all-digit SHAs
+  parse as YAML numbers; report fields must be quoted.

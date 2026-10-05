@@ -54,10 +54,14 @@ are a valid empty inventory for GONE. Keep the resolved roots and commit SHAs
 in the bead notes. Git source records contain stable repository identity,
 relative path, branch and SHA. The script refuses malformed docs
 loudly (unknown type/status/source/scope, missing required fields) and
-prints per-doc SHIPPED, UNCHANGED, RECOVERED, REFUSED, FAILED and GONE findings.
-GONE means missing from the fetched repository/path prefix, never permission
-to delete bank content. Do not edit docs to force them through; a refusal is
-a finding. Pushed drafts are visible; no accepted-source filters are added.
+prints per-doc SHIPPED, UNCHANGED, RECOVERED, HELD, WITHDRAWN, REFUSED, FAILED
+and GONE findings. GONE means missing from the fetched repository/path prefix,
+never permission to delete bank content. HELD is the publication lifecycle
+working: the bank keeps the last eligible revision (a draft after first
+acceptance, or new content awaiting an updated build report). WITHDRAWN is a
+stale build report removed first in an ordered report/document set. Do not edit
+docs to force them through; a refusal or hold is a finding. Never seed or edit
+publication records to unblock a refusal.
 
 For --reprocess, retain completes before the server document reprocess call.
 On exit 3, inspect receipts and live operation details before retrying: a bank
@@ -79,8 +83,9 @@ Its document_receipts are confirmed successes attributed to this task, across
 session resets; recent_scans lists up to 20 earlier scans plus the latest one.
 Report those receipts separately from the last scan's counters. A running older
 scan may have been interrupted; do not infer completion from its counters.
-Summarize the run in the bead notes: counts of shipped / skipped / refused /
-failed, and the specific doc ids for anything refused or failed. If any doc
+Summarize the run in the bead notes: counts of shipped / skipped / held /
+withdrawn / refused / failed, and the specific doc ids for anything held,
+refused or failed, with the shipper's reason. If any doc
 FAILED extraction (operation status 'failed'), read the operation's
 error_message, and mail the mayor with doc id + error. If docs were REFUSED
 for frontmatter problems, mail the rig that owns them (or the mayor if

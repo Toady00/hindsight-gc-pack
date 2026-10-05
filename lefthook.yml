@@ -19,6 +19,7 @@ pre-push:
       run: >-
         PYTHONDONTWRITEBYTECODE=1 python3 -m unittest
         test.test_ingestion
+        test.test_publication
         test.test_pack.SchemaTest
         test.test_pack.ShipReportTest
         test.test_pack.ShipCLITest

@@ -35,12 +35,16 @@ def load_module(name, path):
 
 schema = load_module("docs_schema", PACK / "schemas/docs/validate.py")
 request = load_module("ship_request", SCRIPTS / "ship-request.py")
-FIELDS = dict(schema_version=2, id="spec.fixture", type="spec", title="Fixture", status="draft",
+FIELDS = dict(schema_version=2, id="repo.spec.fixture", type="spec", title="Fixture", status="draft",
               source="agent", scope="repo", repos=["repo"], updated_at="2026-09-04T00:00:00Z")
 DOCUMENT = dict(content=DOC, repo="repo", repository="https://fixture.invalid/repo",
                 relpath="docs/spec.md", ref="refs/heads/main", commit="abc123")
 ROOT = dict(root="/repo/docs", status="ok", detail="", repo="repo", repository=DOCUMENT["repository"],
-            prefix="docs", ref=DOCUMENT["ref"], commit=DOCUMENT["commit"])
+            prefix="docs", ref=DOCUMENT["ref"], commit=DOCUMENT["commit"], toplevel="/repo",
+            namespace="repo\n", accepted_ids=[])
+REPORT_FIELDS = dict(outcome="partial", assesses=[dict(id="repo.prd.fixture", fingerprint="a" * 64)],
+                     code=[dict(repo="repo", commit="b" * 40)])
+REGISTRY = dict(city_name="city", rigs=[dict(name="city", path="/city", hq=True), dict(name="repo", path="/repo")])
 
 
 def report_store():
@@ -56,6 +60,8 @@ def report_store():
 
     store.put.side_effect = put
     store.list_documents.return_value = []
+    store.list_records.side_effect = lambda kind: [dict(value, document_id=key[1]) for key, value in rows.items()
+                                                   if key[0] == kind]
     return store
 
 
@@ -70,7 +76,7 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(set(types), set(schema.STRATEGIES))
         for kind in types:
             with self.subTest(kind=kind):
-                fields = dict(FIELDS, type=kind)
+                fields = dict(FIELDS, type=kind, **(REPORT_FIELDS if kind == "build-report" else {}))
                 self.assertEqual(schema.validate(fields)["strategy"], schema.STRATEGIES[kind])
                 del fields["status"]
                 with self.assertRaisesRegex(ValueError, "status"):
@@ -181,7 +187,10 @@ class ShipCLITest(unittest.TestCase):
         self.store = report_store()
         self.api, self.ingestor = Mock(), Mock()
         self.api.inventory.return_value = []
-        self.ingestor.retain.return_value = "shipped"
+        self.ingestor.retain.side_effect = self.confirmed_retain
+        self.retain_outcome = "shipped"
+        self.ingestor.recover_withdrawal.return_value = False
+        self.ingestor.abandon_failed.return_value = False
         self.snapshot = dict(roots=[deepcopy(ROOT)], documents=[deepcopy(DOCUMENT)], errors=0)
         for name, replacement in (("BeadsStore", Mock(return_value=self.store)),
                                   ("API", Mock(return_value=self.api)),
@@ -189,6 +198,8 @@ class ShipCLITest(unittest.TestCase):
                                   ("require_writer", Mock()),
                                   ("ship_lock", Mock(side_effect=lambda store: nullcontext())),
                                   ("snapshot", Mock(return_value=self.snapshot)),
+                                  ("load_registry", Mock(return_value=deepcopy(REGISTRY))),
+                                  ("owners", Mock(return_value={"/repo": "repo", "/city": "city"})),
                                   ("derive", Mock(return_value=schema.validate(FIELDS)))):
             p = patch.object(ship_docs, name, replacement)
             p.start()
@@ -196,6 +207,14 @@ class ShipCLITest(unittest.TestCase):
         env = patch.dict(os.environ, {"HINDSIGHT_API_URL": "https://fixture.invalid", "HINDSIGHT_BANK": "fixture"}, clear=True)
         env.start()
         self.addCleanup(env.stop)
+
+    def confirmed_retain(self, item, source_hash, source, bank_hash=None, force=False):
+        """The real ingestor confirms a receipt before returning."""
+        state = self.store.get("document", item["document_id"]) or dict(document_id=item["document_id"])
+        state.update(attempt=dict(state="succeeded", source_hash=source_hash),
+                     last_success=dict(source_hash=source_hash, payload_hash=_payload_hash(item)))
+        self.store.put("document", item["document_id"], state)
+        return self.retain_outcome
 
     def ship(self, *args, code=0):
         with patch.object(sys, "argv", ["ship_docs.py", *args, "/repo/docs"]), redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
@@ -212,10 +231,10 @@ class ShipCLITest(unittest.TestCase):
         self.assertNotIn("last_success", self.store.get("bank"))
 
     def test_refused_document_keeps_id_and_is_not_gone(self):
-        ship_docs.derive.return_value = dict(verdict="refuse", document_id="spec.fixture", reason="missing status")
-        self.api.inventory.return_value = [dict(id="spec.fixture", document_metadata=dict(repo="repo", relpath="docs/spec.md"))]
+        ship_docs.derive.return_value = dict(verdict="refuse", document_id="repo.spec.fixture", reason="missing status")
+        self.api.inventory.return_value = [dict(id="repo.spec.fixture", document_metadata=dict(repo="repo", relpath="docs/spec.md"))]
         report = self.ship(code=1)
-        self.assertEqual(report["documents"][0]["id"], "spec.fixture")
+        self.assertEqual(report["documents"][0]["id"], "repo.spec.fixture")
         self.assertEqual(report["counts"]["gone"], 0)
         self.ingestor.retain.assert_not_called()
 
@@ -247,20 +266,29 @@ class ShipCLITest(unittest.TestCase):
                 boundary.side_effect = Error("unavailable", code)
                 report = self.ship(code=code)
                 self.assertEqual(report["status"], "incomplete")
-                boundary.side_effect = None
-        self.api.inventory.return_value = [dict(id="spec.fixture", document_metadata="invalid")]
+                boundary.side_effect = self.confirmed_retain if boundary is self.ingestor.retain else None
+        self.api.inventory.return_value = [dict(id="repo.spec.fixture", document_metadata="invalid")]
         self.assertEqual(self.ship(code=5)["status"], "incomplete")
 
     def test_dry_run_is_read_only_and_requires_receipt_not_just_bank_hash(self):
-        item, digest, _ = ship_docs.item_from(DOCUMENT, schema.validate(FIELDS))
-        self.api.inventory.return_value = [dict(id="spec.fixture", document_metadata=dict(content_hash=digest))]
+        verdict = schema.validate(FIELDS)
+        item, digest, _ = ship_docs.item_from(DOCUMENT, verdict)
         self.ship("--dry-run")
         self.assertIn("WOULD SHIP", self.output)
+        # A bank document with no publication record has no known baseline.
+        self.api.inventory.return_value = [dict(id="repo.spec.fixture", document_metadata=dict(content_hash=digest))]
+        self.ship("--dry-run", code=1)
+        self.assertIn("no publication record", self.output)
         self.store.put.assert_not_called()
         ship_docs.require_writer.assert_not_called()
         self.api.drain.assert_not_called()
         self.assertEqual(self.ingestor.mock_calls, [])
-        self.store.put("document", "spec.fixture", dict(attempt={"state": "succeeded"}, last_success=dict(source_hash=digest, payload_hash=_payload_hash(item))))
+        candidate = ship_docs.candidate_from(DOCUMENT, verdict, digest, "repo")
+        state = dict(document_id="repo.spec.fixture", attempt={"state": "succeeded"},
+                     last_success=dict(source_hash=digest, payload_hash=_payload_hash(item)),
+                     publication=ship_docs.publication.publication_record(candidate, None, None, "then"))
+        self.store.put("document", "repo.spec.fixture", state)
+        self.store.list_documents.return_value = [state]
         self.store.put.reset_mock()
         with patch.object(sys, "argv", ["ship_docs.py", "--dry-run", "/repo/docs"]), redirect_stdout(io.StringIO()) as out:
             self.assertEqual(ship_docs.main(), 0)
@@ -270,10 +298,10 @@ class ShipCLITest(unittest.TestCase):
     def test_later_bank_timeout_preserves_completed_documents_and_full_scan_receipt(self):
         self.ship("--full-scan")
         success = self.store.get("bank")["last_success"]
-        document = dict(document_id="spec.fixture", attempt=dict(state="succeeded", source_hash="hash"),
+        document = dict(document_id="repo.spec.fixture", attempt=dict(state="succeeded", source_hash="hash"),
                         last_success=dict(source_hash="hash", completed_at=success["finished_at"],
                                           reprocess_operation_id="completed-reprocess"))
-        self.store.put("document", "spec.fixture", document)
+        self.store.put("document", "repo.spec.fixture", document)
         self.store.list_documents.return_value = [document]
         self.ingestor.reset_mock()
         self.api.drain.side_effect = API("https://fixture.invalid", "fixture").drain
@@ -283,7 +311,7 @@ class ShipCLITest(unittest.TestCase):
         self.assertEqual(report["status"], "incomplete")
         self.assertEqual(report["counts"]["shipped"], 0)
         self.assertEqual(report["counts"]["failed"], 0)
-        self.assertEqual(self.store.get("document", "spec.fixture"), document)
+        self.assertEqual(self.store.get("document", "repo.spec.fixture"), document)
         self.assertEqual(self.store.get("bank")["last_success"], success)
         self.assertEqual(self.ingestor.mock_calls, [])
         health = ship_report.status(self.store)
@@ -317,12 +345,14 @@ class ShipCLITest(unittest.TestCase):
         events.attach_mock(self.ingestor, "ingestor")
         for reprocess in (False, True):
             with self.subTest(reprocess=reprocess):
-                self.store.list_documents.return_value = [dict(document_id="spec.fixture", attempt=dict(reprocess=reprocess, source_hash=digest, payload_hash=_payload_hash(item)))]
+                self.store.list_documents.return_value = [dict(document_id="repo.spec.fixture", attempt=dict(reprocess=reprocess, source_hash=digest, payload_hash=_payload_hash(item)))]
                 self.ingestor.recover.return_value = True
                 events.reset_mock()
                 report = self.ship("--reprocess")
                 self.assertEqual(report["counts"]["recovered"], 1)
-                self.assertEqual([c[0] for c in events.mock_calls], ["api.drain", "ingestor.recover", "api.inventory", "ingestor.retain"])
+                self.assertEqual([c[0] for c in events.mock_calls], ["api.drain", "ingestor.recover",
+                                 "ingestor.recover_withdrawal", "api.inventory", "ingestor.abandon_failed",
+                                 "ingestor.retain"])
                 self.assertEqual(self.ingestor.retain.call_args.kwargs["force"], not reprocess)
 
 
@@ -380,7 +410,7 @@ class PackShellTest(ShellFixture):
         payload = self.posts()[0]["payload"]
         self.assertIs(payload["async"], True)
         self.assertEqual(payload["items"][0]["content"], DOC.split("---\n")[-1])
-        receipt = self.state("spec.fixture")["last_success"]
+        receipt = self.state("repo.spec.fixture")["last_success"]
         self.assertEqual(receipt["operation_id"], payload["operation_id"])
         for call in self.calls("curl"):
             self.assertIn("Authorization: Bearer fixture-secret", call["stdin"])
@@ -390,7 +420,7 @@ class PackShellTest(ShellFixture):
         self.run_script(SCRIPTS / "ship-docs.sh", docs)
         self.assertEqual(len(self.posts()), 1)
         self.assertEqual(self.state()["latest_run"]["counts"]["skipped"], 1)
-        self.assertEqual(self.state("spec.fixture")["last_success"], receipt)
+        self.assertEqual(self.state("repo.spec.fixture")["last_success"], receipt)
         self.assertEqual(self.state()["last_success"]["status"], "ok")
         before = (self.root / "beads.json").read_text()
         network_calls = len(self.calls("curl"))
@@ -418,18 +448,21 @@ class PackShellTest(ShellFixture):
         docs = self.published_docs()
         self.config["operation_status"] = "failed"
         self.run_script(SCRIPTS / "ship-docs.sh", "--full-scan", docs, code=1)
-        op = self.state("spec.fixture")["attempt"]["operation_id"]
+        op = self.state("repo.spec.fixture")["attempt"]["operation_id"]
         server = json.loads((self.root / "server.json").read_text())
         digest = hashlib.sha256(DOC.encode()).hexdigest()
         self.assertEqual(server["documents"][0]["document_metadata"]["content_hash"], digest)
-        self.assertNotIn("last_success", self.state("spec.fixture"))
+        self.assertNotIn("last_success", self.state("repo.spec.fixture"))
         self.assertNotIn("last_success", self.state())
         self.config.clear()
         self.run_script(SCRIPTS / "ship-docs.sh", "--full-scan", docs)
         self.assertEqual(len(self.posts()), 2)
         self.assertTrue(any(a.endswith(f"/operations/{op}/retry") for a in self.posts()[-1]["args"]))
-        self.assertEqual(self.state("spec.fixture")["last_success"]["operation_id"], op)
-        self.assertEqual(self.state()["latest_run"]["counts"]["recovered"], 1)
+        self.assertEqual(self.state("repo.spec.fixture")["last_success"]["operation_id"], op)
+        # A failed planned publication is retried by the re-planned retain, not
+        # by pre-plan recovery, so the retry happens only if the plan still wants it.
+        self.assertEqual(self.state()["latest_run"]["counts"]["recovered"], 0)
+        self.assertEqual(self.state("repo.spec.fixture")["publication"]["status"], "draft")
         self.assertEqual(self.state()["last_success"]["status"], "ok")
 
     def test_schema_shell_frontmatter_and_null_status_contract(self):

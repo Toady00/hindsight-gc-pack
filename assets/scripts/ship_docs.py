@@ -13,13 +13,15 @@ import sys
 sys.dont_write_bytecode = True
 from connection import resolve
 from git_snapshot import _git, snapshot
-from ingestion import API, BeadsStore, Error, Ingestor, _payload_hash, require_writer, ship_lock
+from ingestion import API, BeadsStore, Error, Ingestor, _payload_hash, now, require_writer, ship_lock
+import publication
 from ship_report import ScanReport
 
 PACK = Path(__file__).resolve().parents[2]
 
 
-def discover_roots(city):
+def load_registry(city):
+    """Read the city's rig registry: city name and every rig's name and path."""
     try:
         result = subprocess.run([os.environ.get("GC_BIN") or "gc", "rig", "list", "--json", "--city", city],
                                 capture_output=True, text=True, timeout=120, check=True)
@@ -28,8 +30,16 @@ def discover_roots(city):
         if not isinstance(rigs, list) or any(not isinstance(r, dict) or not isinstance(r.get("name"), str)
                                            or not isinstance(r.get("path"), str) or not r["path"] for r in rigs):
             raise ValueError("invalid rigs")
-    except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError):
+        city_name = registry.get("city_name") or next((r["name"] for r in rigs if r.get("hq")), "")
+        if not isinstance(city_name, str):
+            raise ValueError("invalid city name")
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
         raise Error("cannot discover rig docs roots from the city registry") from None
+    return dict(city_name=city_name, rigs=rigs)
+
+
+def discover_roots(city, registry=None):
+    rigs = (registry or load_registry(city))["rigs"]
     # Include rig roots even when docs/ is absent in this checkout. The fetched
     # tree determines what exists; a private checkout cannot hide published docs.
     roots = []
@@ -56,6 +66,16 @@ def discover_roots(city):
     return list(dict.fromkeys(roots))
 
 
+def owners(city, registry):
+    """Map each registered checkout to the city or rig name that owns it."""
+    result = {}
+    for rig in registry["rigs"]:
+        result[str(Path(rig["path"]).resolve())] = rig["name"]
+    if registry["city_name"]:
+        result[str(Path(city).resolve())] = registry["city_name"]
+    return result
+
+
 def derive(document, executable):
     try:
         result = subprocess.run([str(executable)], input=document["content"], text=True,
@@ -78,11 +98,34 @@ def derive(document, executable):
         if len(statuses) != 1 or statuses[0] not in {"status:" + s for s in ("draft", "accepted", "superseded", "deprecated")}:
             return dict(verdict="refuse", document_id=verdict["document_id"],
                         reason="schema must emit exactly one valid status tag")
+        problem = lifecycle_error(verdict.get("lifecycle"), statuses[0][len("status:"):])
+        if problem:
+            return dict(verdict="refuse", document_id=verdict["document_id"], reason=problem)
         return verdict
     except subprocess.CalledProcessError:
         raise Error("schema derive failed", 1) from None
     except (subprocess.TimeoutExpired, OSError, ValueError) as error:
         raise Error(f"schema derive failed: {error}", 1) from None
+
+
+def lifecycle_error(lifecycle, status):
+    """Why a schema's optional lifecycle output is unusable, or None."""
+    if lifecycle is None:
+        return None
+    if not isinstance(lifecycle, dict) or lifecycle.get("status", status) != status:
+        return "schema lifecycle must be an object agreeing with the status tag"
+    if "fingerprint" in lifecycle and not (isinstance(lifecycle["fingerprint"], str)
+                                           and re.fullmatch(r"[0-9a-f]{64}", lifecycle["fingerprint"])):
+        return "schema lifecycle fingerprint must be 64 lowercase hex characters"
+    if lifecycle.get("type") == publication.REPORT:
+        assesses = lifecycle.get("assesses")
+        if (not isinstance(assesses, list) or any(
+                not isinstance(ref, dict) or not isinstance(ref.get("id"), str)
+                or not isinstance(ref.get("fingerprint"), str) for ref in assesses)):
+            return "schema lifecycle assesses must list {id, fingerprint} objects"
+        if len({ref["id"] for ref in assesses}) != len(assesses):
+            return "schema lifecycle assesses must not repeat an ID"
+    return None
 
 
 def item_from(document, verdict):
@@ -104,6 +147,105 @@ def item_from(document, verdict):
                                           repository=document["repository"], relpath=document["relpath"],
                                           source_commit=document["commit"], source_ref=document["ref"]))
     return item, source_hash, source
+
+
+def candidate_from(document, verdict, source_hash, namespace):
+    """The lifecycle view of one scanned document."""
+    statuses = [tag[len("status:"):] for tag in verdict["tags"] if tag.startswith("status:")]
+    lifecycle = verdict.get("lifecycle") or {}
+    if not isinstance(lifecycle, dict) or lifecycle.get("status", statuses[0]) != statuses[0]:
+        raise Error("schema lifecycle status disagrees with its status tag", 1)
+    fingerprint = lifecycle.get("fingerprint") or source_hash
+    if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise Error("schema emitted an invalid lifecycle fingerprint", 1)
+    candidate = dict(namespace=namespace, repository=document["repository"], relpath=document["relpath"],
+                     commit=document["commit"], ref=document["ref"], type=lifecycle.get("type") or "",
+                     status=statuses[0], fingerprint=fingerprint, source_hash=source_hash)
+    if candidate["type"] == publication.REPORT:
+        if lifecycle_error(lifecycle, statuses[0]):
+            raise Error("schema emitted an invalid build-report lifecycle", 1)
+        candidate.update({key: lifecycle.get(key) for key in ("assesses", "outcome", "code")})
+    return candidate
+
+
+def resolve_namespaces(roots, owner_of, claims, published=None):
+    """Validate each scanned repository's namespace against durable claims.
+
+    The first publication must use the canonical city or rig name of the
+    checkout's owner. After that the claim binds the key to the repository, so
+    renaming the rig changes nothing and no other repository can take the key.
+    """
+    claimed_by_repo = {}
+    for key, claim in claims.items():
+        claimed_by_repo.setdefault(claim.get("repository"), set()).add(key)
+    result = {}
+    for root in roots:
+        repository = root.get("repository")
+        if root.get("status") != "ok" or repository in result:
+            continue
+        try:
+            if root.get("namespace") is None:
+                raise ValueError(f"repository has no {publication.NAMESPACE_FILE}; add one line naming its "
+                                 "city or rig namespace before publishing")
+            key = publication.read_namespace(root["namespace"])
+            claim = claims.get(key)
+            if claim and claim.get("repository") != repository:
+                raise ValueError(f"namespace '{key}' was first published by {claim.get('repository')}; if that "
+                                 "repository moved, rebind the hindsight-namespace record explicitly")
+            other = sorted(claimed_by_repo.get(repository, set()) - {key})
+            if other:
+                raise ValueError(f"this repository already publishes as namespace '{other[0]}'; a namespace "
+                                 "and its document IDs never change after first publication")
+            owner = owner_of.get(root.get("toplevel", ""))
+            others = sorted((published or {}).get(key, set()) - {repository})
+            if not claim and others:
+                raise ValueError(f"namespace '{key}' has documents published from {others[0]} but no claim; "
+                                 "restore its hindsight-namespace claim before publishing from another origin")
+            if not claim:
+                if owner is None:
+                    raise ValueError("repository is neither the city nor a registered rig, so it owns no namespace")
+                expected = publication.canonical_namespace(owner)
+                if expected is None:
+                    raise ValueError(f"{owner!r} has no canonical namespace form; use lowercase letters, "
+                                     "digits, '_' or '-', and not 'rig' or 'city'")
+                if key != expected:
+                    raise ValueError(f"first publication must use the owner's canonical name '{expected}', not '{key}'")
+            result[repository] = dict(key=key, error=None, claim=None if claim else dict(
+                repository=repository, owner=owner, toplevel=root.get("toplevel")))
+        except ValueError as error:
+            result[repository] = dict(key=None, error=str(error), claim=None)
+    return result
+
+
+def _publication(data):
+    record = data.get("publication")
+    if record is None:
+        return None
+    if (not isinstance(record, dict) or not isinstance(record.get("fingerprint"), str)
+            or record.get("status") not in ("draft", "accepted", "superseded", "deprecated")
+            or not isinstance(record.get("repository"), str)):
+        raise Error(f"invalid publication record for {data.get('document_id')}; manual inspection required")
+    return record
+
+
+def promote(store, document_id):
+    """Advance the publication record once the staged retain is confirmed.
+
+    The intended record is staged with the attempt, so a retain completed by a
+    later scan's recovery still advances exactly the record it was planned
+    with. Nothing advances on an unconfirmed or failed attempt.
+    """
+    state = store.get("document", document_id) or {}
+    pending, receipt = state.get("publication_pending"), state.get("last_success") or {}
+    attempt = state.get("attempt") or {}
+    if (not isinstance(pending, dict) or attempt.get("state") != "succeeded"
+            or receipt.get("source_hash") != pending.get("source_hash")):
+        return False
+    state["publication"] = pending
+    state.pop("publication_pending", None)
+    state.pop("withdrawal", None)
+    store.put("document", document_id, state)
+    return True
 
 
 def main():
@@ -144,7 +286,8 @@ def main():
         ingestor = Ingestor(store, api, work_id=work_id)
         full = args.full_scan or not args.roots
         report = ScanReport(store, full, work_id=work_id)
-        counts = dict(shipped=0, skipped=0, refused=0, failed=0, gone=0, incomplete=0, recovered=0)
+        counts = dict(shipped=0, skipped=0, held=0, withdrawn=0, refused=0, failed=0, gone=0,
+                      incomplete=0, recovered=0)
         report.run["counts"] = counts
 
         def finding(document_id, status, detail, path=""):
@@ -157,11 +300,17 @@ def main():
             print(f"scan record: {bead_id}")
         if args.discovery_error:
             raise Error(args.discovery_error)
-        roots = args.roots or discover_roots(store.city)
+        registry = load_registry(store.city)
+        try:
+            publication.namespace_owners(registry["city_name"],
+                                         [r["name"] for r in registry["rigs"] if not r.get("hq")])
+        except ValueError as error:
+            raise Error(str(error), 2) from None
+        roots = args.roots or discover_roots(store.city, registry)
         if not roots:
             raise Error("no docs roots configured; add a Git rig or pass a Git docs root")
         result = snapshot(roots, args.ref)
-        report.run["roots"] = result["roots"]
+        report.run["roots"] = [{k: v for k, v in root.items() if k != "accepted_ids"} for root in result["roots"]]
         counts["incomplete"] = result["errors"]
         for root in result["roots"]:
             print(f"root {root['status']}: {root['root']} {root['ref']} {root['commit']} {root['detail']}")
@@ -171,30 +320,67 @@ def main():
         if not executable.is_file() or not os.access(executable, os.X_OK):
             raise Error("schema has no executable derive", 2)
 
+        claims = {}
+        for claim in store.list_records("namespace"):
+            claims[claim["document_id"]] = claim
+        published = {}
+        for state in store.list_documents():
+            record = state.get("publication") or {}
+            if record.get("namespace"):
+                published.setdefault(record["namespace"], set()).add(record.get("repository"))
+        namespaces = resolve_namespaces(result["roots"], owners(store.city, registry), claims, published)
+        accepted_ids = {i for root in result["roots"] for i in root.get("accepted_ids", [])}
+
         # Validate the entire manifest before submitting anything. A duplicate ID
         # refuses both files, rather than retaining whichever happens to come first.
-        candidates, seen, duplicates = {}, set(), set()
+        candidates, items, seen, duplicates = {}, {}, set(), set()
+        scanned = {}
         for document in result["documents"]:
             display = f"{document['repo']}@{document['commit']}:{document['relpath']}"
             try:
                 verdict = derive(document, executable)
-                document_id = verdict.get("document_id")
-                if document_id and document_id != "?":
-                    if document_id in seen:
-                        duplicates.add(document_id)
-                    seen.add(document_id)
-                if verdict["verdict"] == "skip":
-                    continue
-                if verdict["verdict"] == "refuse":
-                    counts["refused"] += 1
-                    finding(document_id or "?", "refused", verdict.get("reason", "schema refused"), display)
-                    continue
-                candidates[document_id] = (*item_from(document, verdict), display)
             except Error as error:
                 counts["failed"] += 1
                 finding("?", "failed", str(error), display)
-        for document_id in duplicates:
+                continue
+            scanned.setdefault(document["repository"], []).append(
+                dict(relpath=document["relpath"], verdict=verdict, document=document, display=display))
+            document_id = verdict.get("document_id")
+            if document_id and document_id != "?":
+                if document_id in seen:
+                    duplicates.add(document_id)
+                seen.add(document_id)
+        for repository, documents in scanned.items():
+            namespace = namespaces.get(repository, dict(key=None, error="repository namespace unresolved"))
+            errors, warnings = publication.check_repository(namespace["key"], documents)
+            problems = {}
+            for relpath, message in errors:
+                problems.setdefault(relpath, []).append(message)
+            for relpath, message in warnings:
+                print(f"WARN      {relpath}: {message}", file=sys.stderr)
+            for entry in documents:
+                verdict, document, display = entry["verdict"], entry["document"], entry["display"]
+                document_id = verdict.get("document_id") or "?"
+                if verdict["verdict"] == "skip" or document_id in duplicates:
+                    continue
+                reasons = problems.get(entry["relpath"], [])
+                if verdict["verdict"] == "ship" and namespace["error"]:
+                    reasons = [namespace["error"]] + reasons
+                if verdict["verdict"] == "refuse" or reasons:
+                    counts["refused"] += 1
+                    finding(document_id, "refused", "; ".join(dict.fromkeys(reasons))
+                            or verdict.get("reason", "schema refused"), display)
+                    continue
+                try:
+                    item, source_hash, source = item_from(document, verdict)
+                    candidates[document_id] = candidate_from(document, verdict, source_hash, namespace["key"])
+                    items[document_id] = (item, source_hash, source, display)
+                except Error as error:
+                    counts["failed"] += 1
+                    finding(document_id, "failed", str(error), display)
+        for document_id in sorted(duplicates):
             candidates.pop(document_id, None)
+            items.pop(document_id, None)
             counts["refused"] += 1
             finding(document_id, "refused", "multiple published files claim this document ID")
 
@@ -203,45 +389,241 @@ def main():
         # Recover even records whose source moved or disappeared. Pending payloads
         # live in Beads, so a handoff does not need the previous machine's checkout.
         recovered = {}
-        records = store.list_documents()
         if not args.dry_run:
-            for record in records:
-                if ingestor.recover(record["document_id"]):
+            for record in store.list_documents():
+                if record.get("publication_pending"):
+                    # A planned publication is resolved, never retried, before
+                    # planning: a failed one is retried only if this scan's plan
+                    # selects the same revision again.
+                    try:
+                        if ingestor.recover(record["document_id"], retry=False, replay=False):
+                            recovered[record["document_id"]] = record.get("attempt") or {}
+                            counts["recovered"] += 1
+                            finding(record["document_id"], "recovered", "prior operation completed and receipt confirmed")
+                    except Error as error:
+                        if error.code != 1:
+                            raise
+                        if record["document_id"] not in candidates:
+                            counts["failed"] += 1  # nothing in this scan can settle it
+                        finding(record["document_id"], "unresolved", f"planned publication failed: {error}")
+                elif ingestor.recover(record["document_id"]):
                     recovered[record["document_id"]] = record.get("attempt") or {}
                     counts["recovered"] += 1
                     finding(record["document_id"], "recovered", "prior operation completed and receipt confirmed")
+                if promote(store, record["document_id"]):
+                    finding(record["document_id"], "recovered", "staged publication record confirmed")
+                if ingestor.recover_withdrawal(record["document_id"]):
+                    finding(record["document_id"], "withdrawn", "resumed an interrupted set withdrawal")
+        states = {record["document_id"]: record for record in store.list_documents()}
+        records = {}
+        for document_id, state in states.items():
+            record = _publication(state)
+            if record is not None:
+                records[document_id] = record
         inventory = api.inventory()
         if any(doc.get("document_metadata") is not None and not isinstance(doc["document_metadata"], dict)
                for doc in inventory):
             raise Error("invalid bank document metadata")
         bank_map = {doc["id"]: doc.get("document_metadata") or {} for doc in inventory}
         print(f"bank inventory: {len(bank_map)} document(s)")
-        for document_id, (item, source_hash, source, display) in candidates.items():
+        bank_hashes = {document_id: metadata.get("content_hash") or "" for document_id, metadata in bank_map.items()}
+        staged = {i for i, state in states.items() if i not in records
+                  and (state.get("publication_pending") or state.get("abandoned_attempt"))}
+        decisions, sets = publication.plan(candidates, records, bank_hashes, accepted_ids, staged)
+        for document_id, decision in sorted(decisions.items()):
+            display = items[document_id][3]
+            if decision.action == "hold":
+                counts["held"] += 1
+                finding(document_id, "held", decision.reason, display)
+                record = records.get(document_id)
+                if record and not record.get("visible", True):
+                    counts["failed"] += 1
+                    finding(document_id, "failed", "this build report is withdrawn from the bank and held; the "
+                            "evidence it held is not visible until a consistent report publishes", display)
+                elif record and bank_hashes.get(document_id) != record.get("source_hash"):
+                    # A failed or interrupted retain left other bytes in the bank.
+                    counts["failed"] += 1
+                    finding(document_id, "failed", "the bank does not hold this document's published revision "
+                            f"({record.get('relpath')} at {record.get('commit')}); an earlier retain failed or "
+                            "is unresolved. Republish the published content or an eligible revision", display)
+            elif decision.action == "refuse":
+                counts["refused"] += 1
+                finding(document_id, "refused", decision.reason, display)
+        for publication_set in sets:
+            print(f"set {publication_set['set_id']}: withdraw {publication_set['withdraw']}, "
+                  f"then {publication_set['documents']}, then {publication_set['reports']}")
+
+        withdrawn = {i for i, r in records.items() if not r.get("visible", True)}
+        claimed = set()
+
+        def claim_namespace(repository):
+            """Claim a namespace once a publication from it is confirmed."""
+            namespace = namespaces.get(repository) or {}
+            if not args.dry_run and namespace.get("claim") and repository not in claimed:
+                store.put("namespace", namespace["key"], dict(namespace["claim"], claimed_at=now()))
+                claimed.add(repository)
+
+        def publish(document_id, set_id):
+            item, source_hash, source, display = items[document_id]
+            candidate = candidates[document_id]
+            namespace = namespaces[candidate["repository"]]
+            bank_hash = None if document_id in withdrawn else bank_map.get(document_id, {}).get("content_hash")
+            previous = recovered.get(document_id, {})
+            resumed_reprocess = (previous.get("reprocess") is True
+                                 and previous.get("source_hash") == source_hash
+                                 and previous.get("payload_hash") == _payload_hash(item))
+            staged = decisions[document_id].action == "publish"
+            planned = (publication.publication_record(candidate, records.get(document_id), set_id, now(),
+                                                      document_id in accepted_ids) if staged else None)
+            previous_attempt = (store.get("document", document_id) or {}).get("attempt") or {}
+            if previous_attempt.get("source_hash") not in (None, source_hash):
+                # Settle an earlier revision's operation without retrying it.
+                try:
+                    ingestor.recover(document_id, retry=False, replay=False)
+                except Error as error:
+                    if error.code != 1:
+                        raise
+            if ingestor.abandon_failed(document_id, source_hash, planned):
+                finding(document_id, "abandoned", "a failed attempt for a revision this plan no longer "
+                        "selects was retired instead of retried", display)
+            elif staged:
+                state = store.get("document", document_id) or {"document_id": document_id}
+                state["publication_pending"] = planned
+                store.put("document", document_id, state)
+            outcome = ingestor.retain(item, source_hash, source, bank_hash,
+                                      force=args.reprocess and not resumed_reprocess)
+            if staged:
+                if not promote(store, document_id):
+                    raise Error(f"{document_id}: retain completed but its publication record did not advance")
+                records[document_id] = store.get("document", document_id)["publication"]
+                withdrawn.discard(document_id)
+                claim_namespace(candidate["repository"])
+            counts["skipped" if outcome == "unchanged" else "shipped"] += 1
+            finding(document_id, outcome, display + (f" (set {set_id})" if set_id else ""), display)
+
+        failed_ids = set()
+
+        def failed(document_id, error):
+            failed_ids.add(document_id)
+            counts["failed"] += 1
+            finding(document_id, "failed", str(error), items[document_id][3] if document_id in items else "")
+
+        def pins_unpublished(document_id):
+            """Pinned documents that failed this scan or whose bank copy differs."""
+            return sorted(ref["id"] for ref in candidates[document_id].get("assesses") or []
+                          if ref["id"] in failed_ids or (records.get(ref["id"]) or {}).get("fingerprint") != ref["fingerprint"]
+                          or (ref["id"] not in published_now and bank_hashes.get(ref["id"]) != records[ref["id"]].get("source_hash")))
+
+        published_now = set()
+        # Documents before reports, so a report never becomes visible ahead of
+        # the revisions it pins.
+        order = sorted(decisions.items(), key=lambda pair: (candidates[pair[0]]["type"] == publication.REPORT, pair[0]))
+        for document_id, decision in order:
+            if decision.action not in ("publish", "unchanged") or decision.set_id:
+                continue
+            if candidates[document_id]["type"] == publication.REPORT and not args.dry_run:
+                waiting = pins_unpublished(document_id)
+                if waiting:
+                    counts["held"] += 1
+                    finding(document_id, "held", "pinned revisions are not in the bank after this scan: "
+                            + ", ".join(waiting), items[document_id][3])
+                    continue
+            if args.dry_run:
+                state = store.get("document", document_id) or {}
+                receipt = state.get("last_success") or {}
+                item, source_hash = items[document_id][:2]
+                unchanged = (decision.action == "unchanged" and not args.reprocess
+                             and state.get("attempt", {}).get("state") == "succeeded"
+                             and receipt.get("payload_hash") == _payload_hash(item))
+                counts["skipped" if unchanged else "shipped"] += 1
+                finding(document_id, "unchanged" if unchanged else "would ship", items[document_id][3])
+                continue
             try:
-                bank_hash = bank_map.get(document_id, {}).get("content_hash")
-                if args.dry_run:
-                    state = store.get("document", document_id) or {}
-                    receipt = state.get("last_success") or {}
-                    unchanged = (not args.reprocess and state.get("attempt", {}).get("state") == "succeeded"
-                                 and receipt.get("source_hash") == bank_hash == source_hash
-                                 and receipt.get("payload_hash") == _payload_hash(item))
-                    outcome = "unchanged" if unchanged else "would ship"
-                else:
-                    previous = recovered.get(document_id, {})
-                    resumed_reprocess = (previous.get("reprocess") is True
-                                         and previous.get("source_hash") == source_hash
-                                         and previous.get("payload_hash") == _payload_hash(item))
-                    outcome = ingestor.retain(item, source_hash, source, bank_hash,
-                                              force=args.reprocess and not resumed_reprocess)
-                counts["skipped" if outcome == "unchanged" else "shipped"] += 1
-                finding(document_id, outcome, display, display)
+                publish(document_id, None)
+                published_now.add(document_id)
             except Error as error:
-                counts["failed"] += 1
-                finding(document_id, "failed", str(error), display)
+                failed(document_id, error)
                 if error.code != 1:
                     # An unavailable store or unknown operation cannot be treated
                     # as permission to start more work on the same bank.
                     raise
+
+        # Ordered set publication. Hindsight has no multi-document transaction,
+        # so the order keeps every intermediate state honest: reports pinning
+        # revisions about to change are withdrawn first, documents follow, and
+        # reports come last. A failure leaves less evidence visible, never
+        # evidence about content the bank does not hold.
+        for publication_set in sets:
+            set_id = publication_set["set_id"]
+            order = publication_set["documents"] + publication_set["reports"]
+            if args.dry_run:
+                for report_id in publication_set["withdraw"]:
+                    finding(report_id, "would withdraw", f"before set {set_id}")
+                for document_id in order:
+                    counts["shipped"] += 1
+                    finding(document_id, "would ship", f"{items[document_id][3]} (set {set_id})", items[document_id][3])
+                continue
+            set_state = store.get("set", set_id) or {}
+            set_state.update(
+                state="publishing", started_at=set_state.get("started_at") or now(), work_id=work_id,
+                withdraw=publication_set["withdraw"],
+                members=[dict(id=m, role="report" if m in publication_set["reports"] else "document",
+                              fingerprint=candidates[m]["fingerprint"], source_hash=candidates[m]["source_hash"],
+                              commit=candidates[m]["commit"], relpath=candidates[m]["relpath"]) for m in order])
+            set_state.pop("error", None)
+            store.put("set", set_id, set_state)
+            pending, current = list(order), None
+            try:
+                for report_id in publication_set["withdraw"]:
+                    current = report_id
+                    ingestor.withdraw(report_id, set_id)
+                    withdrawn.add(report_id)
+                    counts["withdrawn"] += 1
+                    finding(report_id, "withdrawn", f"stale assessment removed before set {set_id}")
+                current = None
+                for document_id in order:
+                    current = document_id
+                    if candidates[document_id]["type"] == publication.REPORT:
+                        waiting = pins_unpublished(document_id)
+                        if waiting:
+                            raise Error(f"pinned revisions did not publish: {', '.join(waiting)}", 1)
+                    publish(document_id, set_id)
+                    published_now.add(document_id)
+                    pending.remove(document_id)
+                set_state.update(state="published", completed_at=now())
+                store.put("set", set_id, set_state)
+            except Error as error:
+                failed(current, error)
+                for document_id in pending:
+                    if document_id == current:
+                        continue
+                    counts["held"] += 1
+                    finding(document_id, "held", f"set {set_id} stopped before this member; it resumes on the next scan",
+                            items[document_id][3])
+                set_state.update(state="incomplete", error=str(error))
+                store.put("set", set_id, set_state)
+                if error.code != 1:
+                    raise
+
+        # A crash after a confirmed publication but before its claim leaves the
+        # claim to the next scan that sees the record.
+        for document_id, candidate in candidates.items():
+            if (records.get(document_id) or {}).get("namespace") == (namespaces.get(candidate["repository"]) or {}).get("key"):
+                claim_namespace(candidate["repository"])
+        if not args.dry_run:
+            # A set interrupted earlier may have been completed by later scans,
+            # or replaced on a full scan by a plan with different members.
+            planned = {s["set_id"] for s in sets}
+            for set_state in store.list_records("set"):
+                if set_state.get("state") in ("published", "replaced") or not set_state.get("members"):
+                    continue
+                if all(records.get(m["id"], {}).get("fingerprint") == m["fingerprint"]
+                       and records.get(m["id"], {}).get("visible", True) for m in set_state["members"]):
+                    set_state.update(state="published", completed_at=now(), completed_by="later scan")
+                    store.put("set", set_state["document_id"], set_state)
+                elif full and set_state["document_id"] not in planned and not failed_ids:
+                    set_state.update(state="replaced", replaced_at=now())
+                    store.put("set", set_state["document_id"], set_state)
 
         # A legacy document has only a repo basename. Do not attribute it when
         # multiple scanned origins have the same name.

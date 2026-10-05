@@ -115,6 +115,7 @@ class SurveyTest(unittest.TestCase):
         self.git("init", "--bare", "-q", "-b", "main", str(self.origin), cwd=self.root)
         self.git("clone", "-q", str(self.origin), str(self.repo), cwd=self.root)
         (self.repo / "source.txt").write_text("source\n")
+        (self.repo / ".hindsight-namespace").write_text("repo\n")
         self.commit(self.repo)
         self.git("push", "-q", "origin", "main")
         self.git("remote", "set-head", "origin", "-a")
@@ -238,6 +239,7 @@ class SurveyTest(unittest.TestCase):
         wt = self.prepare()
         doc = self.document(wt)
         self.assertIn("status: draft\nsource: agent\n", doc.read_text())
+        self.assertIn("id: repo.current-state.repo\n", doc.read_text())
         body = doc.read_text().split("---\n", 2)[2]
         result = self.run_survey("stamp")
         self.assertEqual(result.stdout, doc.read_text().split("---\n", 2)[1])

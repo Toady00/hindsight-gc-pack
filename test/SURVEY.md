@@ -91,7 +91,8 @@ must be `survey/current-state-<root>`, not the rig's default branch.
 - New runs default to `<work_dir>/docs/current-state.md`. With a custom
   `output_file`, check that full file path instead. Active runs keep the
   `survey_doc` recorded on their root, including `docs/current-state/README.md`.
-  Its frontmatter contains `id: current-state.<rig>`, `type: current-state`,
+  Its frontmatter contains `id: <namespace>.current-state.<namespace>`, from
+  the rig's published `.hindsight-namespace`, `type: current-state`,
   `status: draft`, and `source: agent`.
 - The content cites real code paths/lines, explains architecture and entry
   points, and distinguishes verified behavior from untested claims. Existing

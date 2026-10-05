@@ -131,6 +131,71 @@ def _documents(repo, report):
     return documents
 
 
+NAMESPACE_FILE = ".hindsight-namespace"
+# Valid as a basic or extended pattern; each match is verified by reading the blob.
+_STATUS_ACCEPTED = "status:.*accepted"
+
+
+def _namespace(repo, commit):
+    """Return the published namespace file text, or None when absent."""
+    listing = _git(repo, "ls-tree", "-z", commit, "--", NAMESPACE_FILE)
+    if not listing:
+        return None
+    header = listing.rstrip(b"\0").split(b"\t", 1)[0].decode("ascii").split(" ")
+    if header[1] != "blob" or header[0] not in ("100644", "100755"):
+        raise ValueError(f"{NAMESPACE_FILE} must be a regular file")
+    return _git(repo, "cat-file", "blob", header[2]).decode("utf-8")
+
+
+def _frontmatter_fields(content):
+    lines = content.splitlines()
+    if not lines or not re.fullmatch(r"---[ \t]*", lines[0]):
+        return {}
+    fields = {}
+    for line in lines[1:]:
+        if re.fullmatch(r"---[ \t]*", line):
+            return fields
+        match = re.fullmatch(r"(id|status):[ \t]*[\"']?([^\"'#\s]+)[\"']?[ \t]*(?:#.*)?", line)
+        if match:
+            fields.setdefault(match.group(1), []).append(match.group(2))
+    return {}
+
+
+def _accepted_ids(repo, commit):
+    """IDs whose published history ever carried ``status: accepted``.
+
+    Lineage follows the document ID in each historical blob, not Git rename
+    detection, so a moved document keeps its history, including moves into
+    the docs root. The whole repository history is read, but only blobs of
+    commits whose diff adds or removes an accepted status line.
+    """
+    args = ["-c", "log.showRoot=true", "-c", "core.quotePath=false", "log", "-m", "--no-renames", "--format=%x00%H", "--name-only",
+            "-G", _STATUS_ACCEPTED, commit]
+    output = _git(repo, *args).decode("utf-8")
+    accepted = set()
+    for block in output.split("\0"):
+        lines = [line for line in block.splitlines() if line]
+        if not lines:
+            continue
+        sha, paths = lines[0], lines[1:]
+        for path in paths:
+            if path.startswith('"'):
+                raise ValueError("git log quoted a path; cannot read acceptance history")
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha):
+            raise ValueError("invalid git log output")
+        for path in paths:
+            if not path.lower().endswith(".md"):
+                continue
+            listing = _git(repo, "ls-tree", "-z", sha, "--", path)
+            if not listing:
+                continue  # deleted by this commit; its accepted state was added earlier
+            oid = listing.rstrip(b"\0").split(b"\t", 1)[0].decode("ascii").split(" ")[2]
+            fields = _frontmatter_fields(_git(repo, "cat-file", "blob", oid).decode("utf-8", "replace"))
+            if fields.get("status") == ["accepted"] and len(fields.get("id", [])) == 1:
+                accepted.add(fields["id"][0])
+    return sorted(accepted)
+
+
 def snapshot(roots: list[str], ref: str = "") -> dict:
     """Return ``roots``, deduplicated ``documents``, and failed-root ``errors``.
 
@@ -144,7 +209,8 @@ def snapshot(roots: list[str], ref: str = "") -> dict:
     candidates = {}
     for root in roots:
         report = dict(root=str(Path(root).absolute()), repo="", repository="", prefix="",
-                      ref="", commit="", status="failed", detail="")
+                      ref="", commit="", status="failed", detail="", toplevel="",
+                      namespace=None, accepted_ids=[])
         reports.append(report)
         try:
             physical = Path(root).resolve()
@@ -157,6 +223,7 @@ def snapshot(roots: list[str], ref: str = "") -> dict:
             if not ancestor.is_dir():
                 ancestor = ancestor.parent
             repo = Path(_git(ancestor, "rev-parse", "--show-toplevel").decode("utf-8").rstrip("\n")).resolve()
+            report["toplevel"] = str(repo)
             report["prefix"] = physical.relative_to(repo).as_posix()
             if report["prefix"] == ".":
                 report["prefix"] = ""
@@ -187,10 +254,13 @@ def snapshot(roots: list[str], ref: str = "") -> dict:
             commit = _git(repo, "rev-parse", "--verify", private_ref + "^{commit}").decode("ascii").strip()
             if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
                 raise ValueError("fetch did not resolve a commit")
+            namespace = _namespace(repo, commit)
+            accepted = _accepted_ids(repo, commit)
             for root_repo, report in members:
-                report["commit"] = commit
+                report.update(commit=commit, namespace=namespace)
                 try:
                     documents = _documents(root_repo, report)
+                    report["accepted_ids"] = accepted
                     candidates[id(report)] = documents
                     report.update(status="ok", detail=f"read {len(documents)} published Markdown documents")
                 except (ValueError, OSError) as error:

@@ -1,13 +1,15 @@
 ---
 name: hindsight-shipping
-description: Getting documents into the platform memory bank — frontmatter contract, the ship path, approval recording, and agent-contributed memory via archivist proposals
+description: Getting documents into the platform memory bank — frontmatter contract, document IDs and namespaces, the per-document publication lifecycle and build-report gate, the ship path, approval recording, and agent-contributed memory via archivist proposals
 ---
 
 # Shipping documents to the memory bank
 
-The bank converges on the docs tree: **anything with valid frontmatter
-ships, drafts included**. You get content into the bank by writing a doc
-and committing it — not by calling the Hindsight API. The archivist's
+The bank holds the last *eligible* published revision of each document;
+Git holds every revision. Drafts publish freely until a document is first
+accepted; after that, see "Publication lifecycle" below. You get content
+into the bank by writing a doc and committing it — not by calling the
+Hindsight API. The archivist's
 scheduled sync (`gc hindsight ship`) is the single ship path. The supported
 v1 import binding is `hindsight`, regardless of the consuming agent's pack.
 
@@ -22,7 +24,7 @@ dialect; a city shipping a different dialect swaps it via
 ```yaml
 ---
 schema_version: 2
-id: spec.eventing.transport.0001    # stable, unique; this IS the bank document_id
+id: widgets.spec.eventing.transport.0001  # <namespace>.<id>; this IS the bank document_id
 type: spec                          # see type table below
 title: Event Transport for Widget Processing
 status: draft                       # draft | accepted | superseded | deprecated
@@ -46,6 +48,13 @@ refused. Legacy bank-native memories need an explicit `--status` on first bump.
 
 Rules that bite:
 
+- **IDs are `<namespace>.<document-id>`** and never change after first
+  publication. The namespace is the single line in `.hindsight-namespace`
+  at the repository root: the city or rig name, lowercased. Do not insert
+  `rig.` or `city.` components. A `.0001` suffix is part of the identity,
+  not a revision number: revise in place, never mint `.0002` for an edit.
+  IDs are unique across the bank, retired documents included; never reuse
+  one for a different document or type.
 - **One status vocabulary for every doc type.** Not "final", not
   "approved", not "proposed" — `draft | accepted | superseded | deprecated`.
 - **`source` is human-in-the-loop for this revision**, not authorship
@@ -58,9 +67,66 @@ Rules that bite:
   `platform` (that's a scope). Copy existing spellings; never mint
   variants.
 - **Docs are never deleted** — mark `deprecated` (or `superseded`) and
-  let the sync re-ship them. Cross-reference related doc ids in the body
+  let the sync re-ship them. Change *only* `status` (and `updated_at`)
+  when you do: retirement applies to the last published content. Cross-reference related doc ids in the body
   (frontmatter is stripped at ship; body text is what survives into
   memory).
+
+## Publication lifecycle
+
+Status belongs to each document. Approval of intent never proves
+implementation; only a build report is implementation evidence.
+
+- **Before first acceptance** every pushed draft revision publishes.
+- **After first acceptance** (published, or anywhere in the document's
+  published Git history), draft revisions — including a plain revert to
+  `draft` — do not publish. The bank keeps the last eligible revision and the
+  scan reports HELD. Edit freely in Git; accept a revision to publish it.
+- **Build-report gate.** Once a published build report pins a document, new
+  content for it publishes only together with an updated report pinning that
+  exact revision. Reacceptance alone does not unlock it. Unchanged documents
+  need no new revision. A new, never-accepted proposal document publishes
+  normally and does not disturb the assessed baseline.
+- **Retire or restore** (`superseded`, `deprecated`, back to `accepted`) only
+  against the last *published* content: everything except `status` and
+  `updated_at`, including `source` and `id`, must match exactly, or the scan
+  REFUSES it. Retired documents are frozen. To repair a mismatch, revert to the
+  published content, restore `accepted`, then edit as a draft.
+
+The **fingerprint** identifies a revision for these rules: the file with only
+the `status` and `updated_at` values masked (`gc hindsight check
+--fingerprint <path>`). Keep each of those fields as one plain top-level
+`key: value` line; duplicates or multi-line forms are refused. Note that
+changing `source` changes the fingerprint.
+
+**Build reports** add three frontmatter fields:
+
+```yaml
+type: build-report
+outcome: partial              # passed | partial | failed — the assessed result
+assesses:                     # exact revisions assessed, same namespace only
+  - id: widgets.spec.eventing.transport.0001
+    fingerprint: '<64-hex from gc hindsight check --fingerprint>'
+code:                         # resulting code state per assessed repository
+  - repo: svc-widgets
+    commit: '<full commit SHA>'
+```
+
+Quote fingerprints and SHAs (YAML reads an all-digit SHA as a number). Pin
+only the initiative's own documents; references elsewhere are body text and
+do not extend the gate. Only build reports may carry `outcome`, `assesses`
+or `code`. Keep reports `status: draft`, `source: agent`: a human-accepted
+report is subject to rule 2 like any document, so its later agent drafts are
+held, and with them every document it pins. Retiring a report, dropping a
+pin, or deleting the report file never releases a pinned document; restore
+the report and publish an update pinning the new revision instead. A report's body states requirement-level outcomes and
+gaps. Its publication is not approval, deployment, or proof that every target
+requirement shipped. Correcting a false assessment needs no new build: pin the
+revisions already published.
+
+Before pushing, run `gc hindsight check` (read-only; the shipper runs the same
+checks). `gc hindsight ship --dry-run` previews HELD and REFUSED decisions
+that depend on publication history.
 
 ## Recording approval — the contract rules
 
@@ -70,7 +136,9 @@ verdict must look like in frontmatter:
 
 - A human approving a revision sets `status: accepted` **and**
   `source: human` together, bumps `updated_at`, commits, and ships (the
-  `gc hindsight ship` command, or let the hourly sync catch it).
+  `gc hindsight ship` command, or let the hourly sync catch it). The
+  `source` change makes this a new fingerprint: a report pins the accepted
+  revision as committed, after this change.
 - Only record an approval a human actually gave, with traceable
   provenance. Never infer one.
 - Revising a human-approved doc reverts `source:` to `agent` (and
@@ -128,7 +196,8 @@ gc hindsight retain --bump --id gotcha.tflint-provider-cache-lock --content-file
 Usually `type: gotcha`; pick the type that fits — the type table is the
 menu, and new agent-memory types are added to the schema deliberately,
 not improvised mid-arbitration. Mint ids as `<type>.<slug>`, stable and
-unique; tag `repos:` for every rig the memory bites (that is how rig
+unique, and never equal to a Git document's ID (the shipper refuses a Git
+document whose ID the bank already holds without a publication record); tag `repos:` for every rig the memory bites (that is how rig
 agents discover it — retrieval rides tags, not residency).
 
 The script appends a `Reported N times (last: ...)` line to the

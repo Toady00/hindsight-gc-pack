@@ -281,11 +281,22 @@ cmd_show() {
 
 # --- stamp -----------------------------------------------------------------
 
+# The ID is <namespace>.current-state.<namespace>: the repository's published
+# namespace is fixed after first publication, so a rig rename keeps the ID.
+survey_id() {
+  local namespace
+  namespace="$(wt_git show "$BASE:.hindsight-namespace" 2>/dev/null)" \
+    || die "the rig's published tree has no .hindsight-namespace; add it before surveying"
+  [[ "$namespace" =~ ^[a-z0-9][a-z0-9_-]*$ && "$namespace" != rig && "$namespace" != city ]] \
+    || die ".hindsight-namespace must hold one lowercase namespace key"
+  printf '%s.current-state.%s\n' "$namespace" "$namespace"
+}
+
 frontmatter() {
   cat <<EOF
 ---
 schema_version: 2
-id: current-state.$GC_RIG
+id: $SURVEY_ID
 type: current-state
 title: $GC_RIG Current State
 status: draft
@@ -304,6 +315,7 @@ cmd_stamp() {
   [[ -s "$doc" ]] || die "survey document $doc is missing or empty — write the body first"
   [[ -x "$DERIVE" ]] || die "schema derive $DERIVE is not executable"
 
+  SURVEY_ID="$(survey_id)" || exit
   tmp="$(mktemp "$WORKTREE/$OUTPUT_DIR/.survey.XXXXXX")"; trap 'rm -f "$tmp"' EXIT
   frontmatter > "$tmp"
   # Drop an existing leading frontmatter block (--- ... ---) so re-stamping is
@@ -365,12 +377,13 @@ cmd_publish() {
     esac
   done
   load_handoff
-  local dirty verdict changes commit
+  local dirty verdict changes commit id
+  id="$(survey_id)" || exit
   dirty="$(wt_git status --porcelain --untracked-files=all)" || gitdie "git status failed"
   [[ -z "$dirty" ]] || die "worktree $WORKTREE has uncommitted changes; commit the survey first"
   [[ -s "$WORKTREE/$DOC" ]] || die "survey document missing or empty"
   verdict="$(wt_git show "HEAD:$DOC" | "$DERIVE")" || die "committed document schema validation failed"
-  jq -e --arg id "current-state.$GC_RIG" '.verdict == "ship" and .document_id == $id and (.tags | index("status:draft") != null and index("source:agent") != null and index("memory_type:current-state") != null)' <<<"$verdict" >/dev/null \
+  jq -e --arg id "$id" '.verdict == "ship" and .document_id == $id and (.tags | index("status:draft") != null and index("source:agent") != null and index("memory_type:current-state") != null)' <<<"$verdict" >/dev/null \
     || die "publish requires a schema-valid agent-authored current-state draft"
   wt_git merge-base --is-ancestor "$BASE" HEAD || die "survey no longer descends from its recorded base"
   changes="$(wt_git log --format= --name-only --no-renames "$BASE..HEAD")" || gitdie "could not inspect survey commits"

@@ -51,8 +51,10 @@ extraction and apply forward-only (see "Two properties worth knowing").
 | `commands/ship/` | `gc <binding> ship` — ship the docs manually at any point (auto-resolves roots; owns `--dry-run` for previews). Pack commands are namespaced by the import binding, so `[imports.hindsight]` makes it `gc hindsight ship` |
 | `commands/survey/` | `gc <binding> survey prepare\|show\|stamp\|publish\|cleanup <root>` — the survey's mechanical steps, shared by the formula and humans |
 | `commands/read/`, `commands/maintain/`, `commands/retain/`, `commands/status/` | `gc hindsight read`, `gc hindsight maintain`, `gc hindsight retain`, `gc hindsight status`: reads, guarded maintenance and bank-native retention, and shared Beads health |
+| `commands/check/` | `gc hindsight check`: read-only local validation of one repository's documents (schema, namespace, ID uniqueness, report pins, `--fingerprint`). The shipper runs the same checks; hook/CI wiring is optional and yours |
 | `commands/lint/` | Optional `gc hindsight lint`: semantic checks on explicit local documents using TypeSafe Jev; `--dry-run` previews requests without API access |
-| `assets/scripts/ship-docs.sh` | Git-only docs shipping from freshly fetched origin branches. Shared Beads receipts track intent, recovery and confirmed completion; bank hashes alone never prove success. Validation, drain-before-ship, operation polling and GONE reports |
+| `assets/scripts/publication.py` | Publication lifecycle policy: namespaces, per-document gates, build-report sets. Pure functions; no I/O |
+| `assets/scripts/ship-docs.sh` | Git-only docs shipping from freshly fetched origin branches, gated by `publication.py`. Shared Beads receipts track intent, recovery and confirmed completion; bank hashes alone never prove success. Validation, drain-before-ship, operation polling and GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
 | `assets/scripts/survey.sh` | Survey mechanics: worktree under `<city>/.gc/worktrees/<rig>/`, validated `status: draft` / `source: agent` frontmatter, push/PR via `gh` or `glab`, safety-gated cleanup. Handoff state lives on the workflow root bead |
@@ -104,7 +106,9 @@ completion. `gc hindsight ship --dry-run` previews locally without retaining or
 updating health, but still fetches Git and reads the bank and city Beads store.
 The first word after `gc` is your import binding name.
 Revise by editing in place; retire with `status: deprecated` — never
-delete.
+delete. Status is per document, and after a document is first accepted only
+accepted revisions publish; see "The shipping contract". `gc hindsight check`
+validates a repository's documents locally, read-only.
 
 **Operator - survey a rig:**
 
@@ -197,28 +201,96 @@ assistance, proposal intake, and candidate selection experiments.
 
 ## The shipping contract
 
-The pack's public promise to any doc producer — platform docs, someone
-else's docs, any schema — is four rules:
+Git holds every revision. The bank is the city-wide record of the relevant
+**published** revision of each document: the last revision that was eligible to
+publish. Status belongs to each document (`draft | accepted | superseded |
+deprecated`), never to an initiative or a set. The shipper enforces these rules
+on every scan, validating the whole manifest before any write:
 
 1. **Publish.** Push a doc with conforming frontmatter to the canonical branch
    of a configured Git docs tree. The next scheduled scan or queued
    `gc hindsight ship` request reconciles it; check the result for completion.
-2. **Revise.** Change it there and it re-ships, replacing its previous
-   self in the bank (`document_id` replace). Change detection is a content
-   hash of the whole file, so *any* change ships — frontmatter included.
-3. **Retire.** Edit the doc to say it is dead (in this platform's schema:
-   `status: superseded` or `deprecated`) and leave the file in place. It
-   re-ships as its own tombstone. Nothing is ever deleted from the bank;
-   a file that vanishes gets a GONE report, never a removal.
-4. **Everything else is not this pack's business.** What "draft" means,
-   who approves, when status flips — that belongs to your doc schema and
-   your workflow pack, and reaches this pack only as content changes.
+2. **Drafts publish freely until first acceptance.** Once a document has been
+   accepted (seen in a publication record or anywhere in its published Git
+   history), reverting it to draft and later draft edits do not publish: the
+   bank keeps the last eligible revision and the scan reports HELD. Accepting a
+   revision makes it eligible again, subject to rule 3.
+3. **Build-report gate.** Once a published build report pins a document, a new
+   content revision of it publishes only together with an updated report that
+   pins that exact revision. Acceptance alone never unlocks it, and neither
+   does retiring the report or dropping the pin: every published report that
+   ever pinned a document keeps governing it. A report may publish alone when
+   it pins revisions the bank already holds, which corrects a false assessment
+   without another build. New, never-accepted documents
+   still publish as drafts without touching the assessed baseline.
+4. **Retire and restore against published content.** `superseded`,
+   `deprecated`, and restoring `accepted` publish immediately, but only when
+   everything except `status` and `updated_at` matches the last *published*
+   content exactly, `source` and `id` included. Retired documents are frozen.
+   To repair, revert to the published content, restore `accepted`, then edit as
+   a draft through reapproval and the build gate. Mismatches are REFUSED, never
+   applied to different bytes. Nothing is deleted; a file that vanishes gets a
+   GONE report, never a removal.
+5. **Identity.** IDs are `<namespace>.<document-id>`, unique across the bank and
+   immutable from first publication. A `.0001` suffix is part of the identity,
+   not a revision counter. `.hindsight-namespace` at each repository root holds
+   the namespace: the city or rig name, lowercased (letters, digits, `_`, `-`,
+   never `rig` or `city`). The first publication must use the owner's canonical
+   name; a `hindsight-namespace` claim, written after the first confirmed
+   publication, binds it to that repository's origin, so a later rig rename
+   changes nothing and no other repository can take it. Document records name
+   their namespace; changing an origin URL means rebinding one claim. A
+   scan fails if the city and rig names collide after lowercasing; Gas City only
+   rejects duplicate rig names. A document may move within its repository: the
+   ID, not Git rename detection, carries its history. An ID never changes type
+   or namespace. A changed ID is a different document: the bank keeps the old
+   one (reported GONE) and the new ID starts without publication or acceptance
+   history. The pack ships no ID migration.
 
-Publication is determined by **where you push**. A draft pushed to the canonical
-branch with `status: draft` is visible. Status records the standing of published
-content; it does not gate ingestion, and no accepted-source filter is added.
-A private or unpushed branch is excluded from the default scan. An explicit
-`--ref` can select another published branch, so do not use it for private drafts.
+What a status *means* and who may set it belongs to your workflow pack.
+
+**Fingerprints.** The docs schema's lifecycle fingerprint is the SHA-256 of the
+file with only the values of the single top-level `status` and `updated_at`
+lines masked. Duplicate frontmatter fields, block-scalar or quoted-key status
+lines, and any parse that does not match the masked text are refused, so the
+exemption can never widen to other fields or the body. `gc hindsight check
+--fingerprint` prints it. A schema without lifecycle output falls back to the
+whole-file hash, which leaves it no status-only changes.
+
+**Build reports** (`type: build-report`) carry `outcome: passed | partial |
+failed`, `assesses` (each `{id, fingerprint}` of an initiative-owned document in
+the same namespace), and `code` (each `{repo, commit}`). Quote fingerprints and
+SHAs: YAML reads an all-digit SHA as a number. A report is implementation
+evidence. Its publication is not human approval, not proof that every target
+requirement shipped, and not deployment. External references to other
+initiatives or repositories do not extend the gate; periodically retrieving the
+*Implementation Reality and Intent Drift* mental model is how those conflicts are
+noticed.
+
+**Complete sets.** Hindsight has no multi-document transaction: retain is
+per document and streaming, and document import commits per document. A report
+and the revisions it pins therefore publish as an ordered set: every governing
+report that pins revisions about to change is first deleted from the bank (its
+derived observations go with it), then the documents publish, then the reports.
+After any prefix of those writes, every visible report pins only revisions the
+bank holds; an interruption leaves less evidence visible, never evidence about
+content the bank lacks. Documents of an interrupted set that did publish stay
+visible without their report until the set resumes; if the author abandons the
+change instead, republishing the previously published content (or a report
+pinning what the bank holds) restores consistency. A failed planned retain is
+retried only when the next plan selects the same revision again; otherwise the
+failed attempt is retired (ABANDONED, kept without its payload for audit) before
+the newly planned revision is submitted. A report is held whenever a pinned
+document's bank copy does not match its record. Every scan, explicit roots
+included, reads the city registry to validate namespace ownership. A `hindsight-publication-set` record names the members
+and state; a later scan resumes it. A withdrawn report's last published pins keep
+governing until a replacement publishes. Within one document, re-ingestion is
+not atomic either: retrieval can briefly see a partly re-extracted revision, as
+with any update. Mental models are periodic syntheses and lag until refreshed.
+
+Publication is still determined by **where you push**. A private or unpushed
+branch is excluded from the default scan. An explicit `--ref` can select another
+published branch, so do not use it for private drafts.
 
 Every scan freshly fetches `origin`, including dry-runs. The default branch
 comes from the remote's advertised HEAD, not a cached `origin/HEAD` or local
@@ -251,6 +323,15 @@ exactly one active archivist must own each writable bank.
 `metadata.hindsight` holds `schema_version: 1` and `api`, `bank`, `kind`,
 `document_id` identity. Its `.data` contains document `attempt`, `last_success`
 and `source`, or bank `latest_run`, `latest_full_scan` and `last_success`.
+Document records also hold `publication`: the published ID's namespace,
+repository, path (and `moved_from`), commit, ref, type, status, fingerprint,
+exact source hash, ever-accepted flag, visibility, set, and for reports their
+pins, outcome and code. The intended record is staged as `publication_pending`
+with the retain and promoted only after the receipt is confirmed, so a retain
+completed by a later scan's recovery advances exactly what was planned. A bank
+document with no publication record has no known baseline: it is refused until
+a record is established deliberately. `hindsight-namespace` and
+`hindsight-publication-set` records hold namespace claims and set progress.
 Before retain POST, the shipper persists a UUID operation intent and full request
 snapshot. It confirms completion before recording success. The next run recovers
 the original unresolved operation with bounded retry, even after a machine

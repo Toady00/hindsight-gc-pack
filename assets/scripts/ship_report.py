@@ -71,6 +71,11 @@ def status(store, work_id=""):
     receipts = []
     for record in store.list_documents():
         attempt, receipt = record.get("attempt"), record.get("last_success")
+        published = record.get("publication") if isinstance(record.get("publication"), dict) else {}
+        if (attempt is None and record.get("abandoned_attempt") and isinstance(receipt, dict)
+                and receipt.get("completed_at") and receipt.get("source_hash") == published.get("source_hash")):
+            # An abandoned failure whose document still holds its published revision.
+            attempt = dict(state="succeeded", source_hash=receipt["source_hash"])
         if (not isinstance(attempt, dict) or attempt.get("state") != "succeeded"
                 or not isinstance(receipt, dict) or receipt.get("source_hash") != attempt.get("source_hash")
                 or not receipt.get("completed_at")):

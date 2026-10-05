@@ -25,7 +25,8 @@ handoff state lives in its metadata (`survey show` prints it).
   options before creation. Retries preserve existing commits and dirty work;
   conflicting options are refused. Defaults: `docs/current-state.md`, `pr`, `auto`.
 - `stamp` — write the `current-state` frontmatter (`id:
-  current-state.<rig>`, `status: draft`, `source: agent`, `updated_at:` now)
+  <namespace>.current-state.<namespace>` from the published
+  `.hindsight-namespace`, `status: draft`, `source: agent`, `updated_at:` now)
   over the document, replacing any existing
   block, and validate it against `schemas/docs/derive`. Refuses without
   touching the file if the schema refuses. Commit the stamped document with

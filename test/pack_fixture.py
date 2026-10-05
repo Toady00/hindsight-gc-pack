@@ -12,7 +12,7 @@ PACK = Path(__file__).resolve().parents[1]
 SCRIPTS = PACK / "assets/scripts"
 DOC = """---
 schema_version: 2
-id: spec.fixture
+id: repo.spec.fixture
 type: spec
 title: Fixture
 status: draft
@@ -82,6 +82,7 @@ class ShellFixture(unittest.TestCase):
         docs = repo / "docs"
         docs.mkdir()
         (docs / "spec.md").write_text(DOC)
+        (repo / ".hindsight-namespace").write_text("repo\n")
         for args in (("add", "."),
                      ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                       "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "fixture"),

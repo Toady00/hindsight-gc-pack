@@ -10,7 +10,9 @@
 #      "tags":[…],"observation_scopes":[[…]],
 #      "context":…,"timestamp":…}                         ready to retain
 #       (optional "content" overrides the core's default of
-#        frontmatter-stripped body)
+#        frontmatter-stripped body; optional "lifecycle" carries
+#        {status, type, fingerprint} and, for build reports,
+#        {outcome, assesses, code} for the core's publication gates)
 #   stderr: warn-level findings (shipped anyway), one per line
 #   env (provided by the core when available):
 #     HINDSIGHT_KNOWN_REPOS         newline-separated rig names
@@ -30,4 +32,4 @@ if ! frontmatter="$(yq --front-matter=extract -o=json '.' "$FILE" 2>/dev/null)";
   echo '{"verdict":"refuse","document_id":"?","reason":"malformed YAML frontmatter"}'
   exit 0
 fi
-python3 "$DIR/validate.py" <<<"$frontmatter"
+python3 "$DIR/validate.py" --file "$FILE" <<<"$frontmatter"

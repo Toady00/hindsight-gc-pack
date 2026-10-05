@@ -89,7 +89,11 @@ def _temporary_json(value):
 
 class BeadsStore:
     VERSION = 1
-    TYPES = {"document": "hindsight-document", "bank": "hindsight-bank"}
+    # Publication records live on document records. Namespace claims bind a
+    # namespace key to the repository that first published under it; set
+    # records link the members of one ordered report/document publication.
+    TYPES = {"document": "hindsight-document", "bank": "hindsight-bank",
+             "namespace": "hindsight-namespace", "set": "hindsight-publication-set"}
 
     def __init__(self, api, bank):
         self.api, self.bank = _connection(api, bank)
@@ -142,7 +146,7 @@ class BeadsStore:
     def _identity(self, kind, document_id):
         if not isinstance(kind, str) or kind not in self.TYPES or not isinstance(document_id, str):
             raise Error("invalid ingestion record identity", 2)
-        if (kind == "document" and not document_id) or (kind == "bank" and document_id):
+        if (kind != "bank" and not document_id) or (kind == "bank" and document_id):
             raise Error("invalid document ID for ingestion record kind", 2)
         return {"api": self.api, "bank": self.bank, "kind": kind, "document_id": document_id}
 
@@ -194,6 +198,9 @@ class BeadsStore:
         return self._find(kind, document_id)[1]
 
     def list_documents(self):
+        return self.list_records("document")
+
+    def list_records(self, wanted):
         documents, seen = [], set()
         for row in self._list("hindsight:records"):
             metadata = row.get("metadata")
@@ -208,7 +215,7 @@ class BeadsStore:
             if key in seen:
                 raise Error("duplicate ingestion record key; manual repair required")
             seen.add(key)
-            if kind == "document":
+            if kind == wanted:
                 documents.append(data)
         return documents
 
@@ -243,7 +250,8 @@ class BeadsStore:
         if row:
             self._call("update", row["id"], "--metadata", metadata_json, "--json")
         else:
-            title = "Hindsight document: " + document_id if kind == "document" else "Hindsight bank: " + self.bank
+            title = ("Hindsight bank: " + self.bank if kind == "bank"
+                     else "Hindsight " + kind + ": " + document_id)
             self._call("create", "--title", title,
                        "--status", "pinned", "--type", self.TYPES[kind],
                        "--label", "hindsight:records," + self._key(kind, document_id),
@@ -368,6 +376,9 @@ class API:
                         "; document receipts are unchanged. Inspect receipts and live operation details "
                         "before retrying; do not repeat --reprocess solely because this wait timed out", 3) from error
 
+    def document_ids(self):
+        return {row["id"] for row in self.inventory()}
+
     def inventory(self):
         documents, seen, expected = [], set(), None
         while True:
@@ -490,7 +501,7 @@ class Ingestor:
         if time.monotonic() >= deadline:
             raise Error("active operation timeout; child completion unconfirmed", 3)
 
-    def _finish(self, document_id, state, deadline, retry):
+    def _finish(self, document_id, state, deadline, retry, replay=True):
         attempt = state["attempt"]
         phase = attempt.get("phase")
         if phase == "reprocess_prepared":
@@ -523,6 +534,13 @@ class Ingestor:
             if status == "not_found":
                 if reprocessing:
                     raise Error("reprocess operation not found; manual inspection required")
+                if not replay:
+                    # Never submitted, so nothing is visible: settle it as failed
+                    # rather than resubmit a revision the plan may no longer want.
+                    attempt["state"] = "failed"
+                    attempt["error"] = "retain operation " + op_id + " not found; not replayed"
+                    self._save(document_id, state)
+                    raise Error(attempt["error"], 1)
                 if replayed:
                     raise Error("replayed retain operation still not found; outcome unknown")
                 self._submit(document_id, state)
@@ -594,7 +612,71 @@ class Ingestor:
                 raise Error("unknown Hindsight operation status; attempt retained")
             _pause(deadline)
 
-    def recover(self, document_id, timeout=900):
+    def withdraw(self, document_id, set_id, timeout=300):
+        """Remove a stale report from the bank before its set changes documents.
+
+        Deleting a document also deletes the observations derived from it.
+        Deletion is idempotent in intent: confirmed absence, not an
+        acknowledgement, completes the withdrawal, so an interrupted attempt is
+        simply resumed. The record keeps its last published pins, which still
+        govern the documents it assessed.
+        """
+        require_writer()
+        state = self.store.get("document", document_id) or {"document_id": document_id}
+        withdrawal = state.get("withdrawal")
+        if not (isinstance(withdrawal, dict) and withdrawal.get("state") == "prepared"):
+            state["withdrawal"] = {"set": set_id, "state": "prepared", "prepared_at": now()}
+            self._save(document_id, state)
+        with _budget(self.api, timeout):
+            if document_id in self.api.document_ids():
+                try:
+                    self.api.request("DELETE", "documents/" + quote(document_id, safe=""))
+                except Error as error:
+                    if error.code == 3:
+                        raise
+                if document_id in self.api.document_ids():
+                    raise Error("withdrawal of " + document_id + " is unconfirmed; its durable intent "
+                                "is retained and the next scan resumes it")
+        state = self.store.get("document", document_id) or state
+        state["withdrawal"] = dict(state.get("withdrawal") or {}, state="done", completed_at=now())
+        publication = state.get("publication")
+        if isinstance(publication, dict):
+            publication.update(visible=False, withdrawn_for=state["withdrawal"].get("set"))
+        self._save(document_id, state)
+        return True
+
+    def abandon_failed(self, document_id, source_hash, pending=None):
+        """Retire a failed attempt for a revision the current plan no longer selects.
+
+        ``retain`` otherwise retries the old failed operation before submitting
+        anything new, which could make a revision visible that publication rules
+        now hold, or block every later revision behind a repeating failure. The
+        attempt is kept, without its payload, for audit. ``pending`` is the
+        newly planned publication record, staged in the same write so no crash
+        can leave a stamped bank copy with neither record.
+        """
+        state = self.store.get("document", document_id) or {}
+        attempt = state.get("attempt")
+        if not isinstance(attempt, dict) or attempt.get("state") != "failed" or attempt.get("source_hash") == source_hash:
+            return False
+        require_writer()
+        state["abandoned_attempt"] = dict({k: v for k, v in attempt.items() if k != "payload"}, abandoned_at=now())
+        del state["attempt"]
+        if pending is not None:
+            state["publication_pending"] = pending
+        elif (state.get("publication_pending") or {}).get("source_hash") == attempt.get("source_hash"):
+            del state["publication_pending"]
+        self._save(document_id, state)
+        return True
+
+    def recover_withdrawal(self, document_id):
+        state = self.store.get("document", document_id) or {}
+        withdrawal = state.get("withdrawal")
+        if not isinstance(withdrawal, dict) or withdrawal.get("state") != "prepared":
+            return False
+        return self.withdraw(document_id, withdrawal.get("set"))
+
+    def recover(self, document_id, timeout=900, retry=True, replay=True):
         state = self.store.get("document", document_id)
         if not state or state.get("attempt") is None:
             return False
@@ -604,7 +686,7 @@ class Ingestor:
             return False
         require_writer()
         with _budget(self.api, timeout) as deadline:
-            self._finish(document_id, state, deadline, retry=True)
+            self._finish(document_id, state, deadline, retry=retry, replay=replay)
         return True
 
     def retain(self, item, source_hash, source, bank_hash=None, force=False, timeout=900):

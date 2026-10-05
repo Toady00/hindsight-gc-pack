@@ -63,9 +63,13 @@ Other standing models: `platform-architecture-and-service-map`,
 `analysis-generation-methodology`, `open-risks-and-questions`,
 `company-strategy-and-operating-model`.
 
-## Status semantics — everything ships, including drafts
+## Status semantics — published revisions, drafts included
 
-The bank deliberately contains work in flight. Read the tags:
+The bank deliberately contains work in flight: drafts publish until a
+document is first accepted. After that it holds the last accepted (or
+retired) revision; a newer draft may exist only in Git. A build report is
+implementation evidence for the exact revisions it lists in `assesses`, not
+approval, deployment, or proof that every requirement shipped. Read the tags:
 
 | Pair | Means |
 |---|---|

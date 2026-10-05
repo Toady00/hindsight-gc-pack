@@ -648,12 +648,13 @@ class BeadsCLITest(unittest.TestCase):
         self.store.put("document", "docs/a", {"source": SOURCE, "attempt": {"state": "succeeded"}})
         self.assertEqual(self.rows[0]["metadata"]["unrelated"], {"keep": True})
         self.assertEqual(len(self.rows), 1)
-        self.assertEqual(self.custom_types, "existing,other,hindsight-document,hindsight-bank")
+        self.assertEqual(self.custom_types, "existing,other,hindsight-document,hindsight-bank,"
+                         "hindsight-namespace,hindsight-publication-set")
         self.assertEqual(sum(call[:2] == ["config", "get"] for call in self.calls), 1)
         self.assertEqual(self.calls[-1][0], "list")
 
     def test_existing_types_need_no_config_set(self):
-        self.custom_types = "hindsight-document,other,hindsight-bank"
+        self.custom_types = "hindsight-document,other,hindsight-bank,hindsight-namespace,hindsight-publication-set"
         self.put()
         self.assertFalse(any(call[:2] == ["config", "set"] for call in self.calls))
 

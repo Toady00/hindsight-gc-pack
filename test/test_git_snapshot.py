@@ -86,10 +86,31 @@ class GitSnapshotTest(unittest.TestCase):
             "root": str(self.repo / "docs"), "repo": "published",
             "repository": self.remote.as_uri(), "prefix": "docs", "ref": "refs/heads/main",
             "commit": self.published, "status": "ok", "detail": "read 2 published Markdown documents",
+            "toplevel": str(self.repo.resolve()), "namespace": None, "accepted_ids": [],
         })
         self.assertEqual(before, self.git(self.repo, "status", "--porcelain"))
         self.assertFalse((self.repo / ".git/FETCH_HEAD").exists())
         self.assertEqual(self.git(self.repo, "for-each-ref", "refs/hindsight-snapshot/"), "")
+
+    def test_namespace_and_acceptance_history_follow_ids_not_paths(self):
+        doc = "---\nid: alpha.spec.a.0001\nstatus: {}\n---\nBody {}\n"
+        self.write(".hindsight-namespace", "alpha\n")
+        self.write("docs/old.md", doc.format("draft", 1))
+        self.commit("draft")
+        self.write("docs/old.md", doc.format("'accepted'  # approved", 1))
+        self.commit("accept")
+        (self.repo / "docs/old.md").unlink()
+        self.write("docs/moved/new.md", doc.format("draft", 2))
+        self.write("docs/c.md", "---\nid: alpha.spec.c.0001\nstatus: draft\n---\nstatus: accepted\n")
+        self.write("plain/outside.md", "---\nid: alpha.spec.z.0001\nstatus: accepted\n---\n")
+        self.commit("move, revise, and mention acceptance only in a body")
+        self.git(self.repo, "push", "origin", "main")
+        root = self.scan()["roots"][0]
+        self.assertEqual(root["namespace"], "alpha\n")
+        self.assertEqual(root["toplevel"], str(self.repo.resolve()))
+        # History is repository-wide, so a document accepted outside the docs
+        # root keeps it after moving in; acceptance named only in a body does not count.
+        self.assertEqual(root["accepted_ids"], ["alpha.spec.a.0001", "alpha.spec.z.0001"])
 
     def test_missing_local_origin_head_is_irrelevant(self):
         self.git(self.repo, "update-ref", "-d", "refs/remotes/origin/HEAD")

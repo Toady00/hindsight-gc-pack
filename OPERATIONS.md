@@ -175,11 +175,23 @@ to Git, even if absent in the checkout. An existing non-Git city docs directory
 is refused. A missing rig repository is an error. A docs path
 absent from the fetched tree is a valid empty inventory, including for GONE.
 
-Push to the canonical branch to publish. A pushed `status: draft` document is
-visible; status is not a publication gate. Dirty files, untracked files, local
-commits and the checked-out branch do not affect the shipped content. A selected
-`--ref` branch is also a publication source, so do not use it for private drafts.
-No accepted-source filters are added.
+Push to the canonical branch to publish. Pushing makes a revision a candidate;
+the publication lifecycle in the README's "The shipping contract" decides whether
+it publishes, is HELD (the bank keeps the last eligible revision), or is REFUSED.
+Dirty files, untracked files, local commits and the checked-out branch do not
+affect the shipped content. A selected `--ref` branch is also a publication
+source, so do not use it for private drafts. No accepted-source filters are added.
+
+Each scanned repository needs `.hindsight-namespace` in its published tree. The
+first scan that publishes from a repository writes a `hindsight-namespace` claim
+binding that key to the repository's origin identity, after its first confirmed
+publication. If a repository's origin legitimately moves (a URL form change, a
+rename, a transfer), the shipper refuses its documents until an operator updates
+that one claim's `repository` deliberately; document records name the namespace,
+not the origin, so nothing else needs rebinding (`gc bd --city "$GC_CITY_PATH" list
+--label hindsight:records --json` to find it; edit `metadata.hindsight.data`).
+There is no automatic rebinding. Repositories that are neither the city nor a
+registered rig own no namespace; register them as rigs.
 
 The shipper pins each repository's fetched commit while reading its trees and
 blobs. Fetch, tree-listing or blob-read failure in any root stops the scan before
@@ -231,6 +243,33 @@ again only when submitting a separate report.
 The pending payload stays in Beads until successful completion, then is removed
 from current metadata. Dolt history retains earlier values, including document
 content. Treat the city database and its history as copies of the source corpus.
+
+## Publication records
+
+Each document record's `publication` describes the revision the bank was given:
+namespace, repository, path, commit, type, status, lifecycle fingerprint, exact
+source hash, whether the document was ever accepted, visibility, its set, and a
+report's pins. It is staged as `publication_pending` before the retain and
+promoted only after a confirmed receipt, including when a later scan's recovery
+completes the attempt. A pending record whose attempt failed is not a baseline.
+
+A bank document without a publication record has no known baseline. The shipper
+refuses changes to it rather than guessing what was published, whether it was
+accepted, or whether a status change applies to the same content. Establishing
+such a baseline is a deliberate, inspected operator action against the exact
+published Git revision; the pack ships no migration tooling.
+
+`hindsight-publication-set` records list a set's members, target fingerprints,
+the reports withdrawn first, and `state` (`publishing`, `published`,
+`incomplete`). A withdrawal is recorded on the report as `withdrawal` before the
+DELETE and completes only when the document is confirmed absent; the next scan
+resumes an interrupted one. An `incomplete` set is resumed by the next scan with
+the same inputs and is marked `published` once every member's record matches.
+Withdrawn reports stay out of the bank, with their last pins still governing,
+until a consistent replacement publishes. Report records keep `governs`, every
+document they have ever pinned; dropping a pin or retiring the report releases
+none of them. A failed attempt for a revision the current plan no longer selects
+is moved to `abandoned_attempt` instead of being retried.
 
 A bank `document_metadata.content_hash` alone does not prove completion: a failed
 streaming retain can already have stamped it. Skipping requires a matching
