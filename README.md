@@ -216,8 +216,9 @@ on every scan, validating the whole manifest before any write:
    bank keeps the last eligible revision and the scan reports HELD. Accepting a
    revision makes it eligible again, subject to rule 3.
 3. **Build-report gate.** Once a published build report pins a document, a new
-   content revision of it publishes only together with an updated report that
-   pins that exact revision. Acceptance alone never unlocks it, and neither
+   content revision of it is eligible only in the same scan as an updated report
+   that pins that exact revision; they publish in the ordered sequence below,
+   which is not atomic. Acceptance alone never unlocks it, and neither
    does retiring the report or dropping the pin: every published report that
    ever pinned a document keeps governing it. A report may publish alone when
    it pins revisions the bank already holds, which corrects a false assessment
@@ -267,15 +268,27 @@ initiatives or repositories do not extend the gate; periodically retrieving the
 *Implementation Reality and Intent Drift* mental model is how those conflicts are
 noticed.
 
-**Complete sets.** Hindsight has no multi-document transaction: retain is
-per document and streaming, and document import commits per document. A report
-and the revisions it pins therefore publish as an ordered set: every governing
+**Ordered sets, not complete-set visibility.** Hindsight v0.10.x has no
+multi-document transaction and no server-side visibility switch that every
+reader honours, so several documents cannot be revealed at once: retain is per document and streaming, tag PATCH and
+document import commit per document, per-memory invalidation applies only after
+ingestion, and bank import only creates a new bank. Consumers therefore *can*
+see a partially ingested report/document set. What the shipper guarantees is
+narrower. A report and the revisions it pins publish as an ordered set: every governing
 report that pins revisions about to change is first deleted from the bank (its
 derived observations go with it), then the documents publish, then the reports.
 After any prefix of those writes, every visible report pins only revisions the
 bank holds; an interruption leaves less evidence visible, never evidence about
-content the bank lacks. Documents of an interrupted set that did publish stay
-visible without their report until the set resumes; if the author abandons the
+content the bank lacks. The price is the opposite exposure: while a set
+publishes (each retain is a full extraction, typically minutes) its new intent
+revisions are visible with no report, which falls short of the agreed
+hold-until-report semantics. Retrieved bank content cannot show which revision a
+report assessed. What the bank holds is recorded in the city's publication
+records: each document record's `publication` (published fingerprint, visibility,
+set, and a report's pins) and the `hindsight-publication-set` state. Git alone
+(`gc hindsight check --fingerprint` against the report file's `assesses`)
+describes the repository, which can differ from the bank. Documents of an interrupted set
+that did publish stay visible without their report until the set resumes; if the author abandons the
 change instead, republishing the previously published content (or a report
 pinning what the bank holds) restores consistency. A failed planned retain is
 retried only when the next plan selects the same revision again; otherwise the
@@ -285,8 +298,8 @@ document's bank copy does not match its record. Every scan, explicit roots
 included, reads the city registry to validate namespace ownership. A `hindsight-publication-set` record names the members
 and state; a later scan resumes it. A withdrawn report's last published pins keep
 governing until a replacement publishes. Within one document, re-ingestion is
-not atomic either: retrieval can briefly see a partly re-extracted revision, as
-with any update. Mental models are periodic syntheses and lag until refreshed.
+not atomic either: retrieval can see a partly re-extracted revision while it
+re-ingests and, if the retain fails, until a later scan replaces it. Mental models are periodic syntheses and lag until refreshed.
 
 Publication is still determined by **where you push**. A private or unpushed
 branch is excluded from the default scan. An explicit `--ref` can select another

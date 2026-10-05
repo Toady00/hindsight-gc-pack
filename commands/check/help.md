@@ -27,7 +27,8 @@ From an external or sibling checkout, supply city context with `GC_CITY`, or run
 - IDs are unique in the repository, counting retired (superseded/deprecated)
   documents, which keep their IDs forever.
 - Build reports pin only documents in the same namespace. A pin that is not the
-  current file's fingerprint is a warning: the two cannot publish together.
+  current file's fingerprint is a warning: the current file cannot publish until
+  the report pins it.
 
 `--fingerprint` prints `<fingerprint>  <id>  <path>` for shippable documents. The
 fingerprint hashes the file with only the values of `status` and `updated_at`

@@ -125,7 +125,7 @@ def check_repository(namespace, documents):
             elif fingerprints[ref["id"]] != ref["fingerprint"]:
                 warnings.append((document["relpath"], f"{verdict['document_id']}: assesses {ref['id']} at "
                                  f"{ref['fingerprint'][:12]}, but the current file is {str(fingerprints[ref['id']])[:12]}; "
-                                 "they cannot publish together until the report pins the current revision"))
+                                 "the current file cannot publish until the report pins it"))
     return errors, warnings
 
 
@@ -285,11 +285,11 @@ def plan(candidates, records, bank_hashes, accepted_ids, staged=frozenset()):
             if blocking:
                 decisions[document_id] = Decision(
                     "hold", "a published build report assesses this document (" + ", ".join(blocking)
-                    + "); its new content publishes only with an updated, evidence-backed report pinning "
+                    + "); its new content is eligible only in the same scan as an updated, evidence-backed report pinning "
                     "this exact revision")
                 changed = True
 
-    # Group writes that must become visible as one consistent set.
+    # Group writes that publish as one ordered, non-atomic set.
     parent = {}
 
     def find(x):

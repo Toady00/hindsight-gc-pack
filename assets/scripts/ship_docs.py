@@ -549,7 +549,7 @@ def main():
                     raise
 
         # Ordered set publication. Hindsight has no multi-document transaction,
-        # so the order keeps every intermediate state honest: reports pinning
+        # so the order keeps every visible report's pins honest: reports pinning
         # revisions about to change are withdrawn first, documents follow, and
         # reports come last. A failure leaves less evidence visible, never
         # evidence about content the bank does not hold.

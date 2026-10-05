@@ -83,8 +83,10 @@ implementation; only a build report is implementation evidence.
   `draft` — do not publish. The bank keeps the last eligible revision and the
   scan reports HELD. Edit freely in Git; accept a revision to publish it.
 - **Build-report gate.** Once a published build report pins a document, new
-  content for it publishes only together with an updated report pinning that
-  exact revision. Reacceptance alone does not unlock it. Unchanged documents
+  content for it is eligible only in the same scan as an updated report pinning
+  that exact revision. They publish in order (stale report withdrawn, documents,
+  then report), not atomically: readers can see the new revision with no
+  report while the set publishes and, after an interruption, until a later scan completes it. Reacceptance alone does not unlock it. Unchanged documents
   need no new revision. A new, never-accepted proposal document publishes
   normally and does not disturb the assessed baseline.
 - **Retire or restore** (`superseded`, `deprecated`, back to `accepted`) only

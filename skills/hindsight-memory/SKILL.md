@@ -69,7 +69,13 @@ The bank deliberately contains work in flight: drafts publish until a
 document is first accepted. After that it holds the last accepted (or
 retired) revision; a newer draft may exist only in Git. A build report is
 implementation evidence for the exact revisions it lists in `assesses`, not
-approval, deployment, or proof that every requirement shipped. Read the tags:
+approval, deployment, or proof that every requirement shipped. Publication
+of a report and its documents is ordered, not atomic: an intent document can be
+newer than any report pinning it while the set publishes and, after an interruption, until a later scan completes it. Retrieved content cannot show which
+revision a report assessed. The city's publication records do: each document
+record's `publication` holds the published fingerprint and a report's pins, and
+`hindsight-publication-set` records show whether a set is still publishing.
+Comparing Git fingerprints with the report file describes Git, not the bank. Read the tags:
 
 | Pair | Means |
 |---|---|

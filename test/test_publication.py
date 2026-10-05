@@ -467,7 +467,7 @@ class ShipFlowTest(unittest.TestCase):
     def published(self, document_id):
         return self.store.get("document", document_id)["publication"]
 
-    def test_build_iteration_publishes_report_and_specs_together(self):
+    def test_build_iteration_publishes_report_and_specs_in_order(self):
         spec = self.doc("a", "accepted", "R1 v1")
         report = self.report("R1 implemented", "a")
         self.ship()
