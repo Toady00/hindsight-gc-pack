@@ -123,7 +123,7 @@ What clears the bar: a verified surprise whose failure was silent,
 misleading, or far from its cause — the kind that would cost the next
 agent the same time it cost you.
 
-    gc mail send {{or .HINDSIGHT_ARCHIVIST "archivist"}} -s "memory proposal: <one line>" \
+    gc mail send {{or .HINDSIGHT_ARCHIVIST "archivist"}} --notify -s "memory proposal: <one line>" \
       -m "<see required contents below>"
 
 Your mail must cover all four, or it bounces:
@@ -135,7 +135,14 @@ Your mail must cover all four, or it bounces:
 4. What a future agent should do differently.
 
 One mail per finding; never batch unrelated findings. Retention is the
-archivist's call, not yours — keep working; do not wait for a reply.
+archivist's call, not yours — keep working; do not wait for a reply. `--notify`
+requests an archivist turn; sending mail alone leaves it for a future turn.
+Check stderr for `nudge failed` or `no managed wake was requested` even after
+exit 0, or missing/false `notified` when using `--json`. Preserve the message ID
+and retry attention once with `gc session nudge {{or .HINDSIGHT_ARCHIVIST "archivist"}} "Mail <id> needs action." --delivery wait-idle`;
+do not resend the proposal to repair notification. If that fails or only queues
+without wake, report the undelivered proposal rather than
+claiming arbitration or retention from a send receipt.
 {{- end}}
 
 {{define "hindsight-arbitrate"}}{{templateFirst . (printf "hindsight-arbitrate-%s" .AgentName) (printf "hindsight-arbitrate-%s" .TemplateName) "hindsight-arbitrate-default"}}{{end}}
@@ -183,13 +190,17 @@ verdict**, and unsure means deny. Work each proposal in order:
    - **Durable.** Pinned to code, tools, or architecture that persists.
      Anything with an expiry date → deny.
 5. **Routing beats retaining.** If the root cause is a doc that
-   affirmatively says the wrong thing, mail the owning rig to fix the
-   doc instead of accepting — the bank converges on the corrected doc.
+   affirmatively says the wrong thing, identify a named session in the owning
+   rig and send a notified request for a tracked document repair instead of
+   accepting; use the mayor if the owner is unclear. The bank converges on the
+   corrected doc through the normal publication path.
 6. **Accept** → retain it with `gc hindsight retain` (usually
    `type: gotcha`; pick the type that fits), with `repo:` tags for the
    rigs it bites. Agent memories are bank-native — no file, no commit;
    the script is the only write path and handles serialization.
    Mechanics in the `hindsight-shipping` skill.
-7. **Reply one line either way** — verdict and reason. That is how
-   proposers calibrate against the bar.
+7. **Reply one line either way** — verdict and reason. Verdicts and incomplete
+   proposal bounces are deferred calibration mail: send them without `--notify`.
+   Proposers keep working and read the result on a later turn; do not wake them
+   or cancel an unrelated completion wait just to deliver this feedback.
 {{- end}}

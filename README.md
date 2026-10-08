@@ -511,6 +511,10 @@ Custom prose for one agent, no pack edits — define in any
 {{define "hindsight-brief-delivery"}}...your prose...{{end}}
 ```
 
+Overrides of `hindsight-propose-<AgentName>` or `hindsight-propose-<TemplateName>`
+must preserve proposal `--notify` and notification-failure handling. A custom
+proposal format does not make unread mail wake the archivist.
+
 Because injection rides the prompt template, it is delivered at session
 start and re-delivered after compaction on every harness gc manages
 (claude/codex re-prime via hooks and handoff restarts; opencode
@@ -527,6 +531,17 @@ expensive when sprung / durable — `hindsight-arbitrate` is the policy,
 the `hindsight-shipping` skill the mechanics); accepted memories are
 retained by `memory-retain.sh` — `type: gotcha` today, and the pipeline
 is type-agnostic.
+
+Proposal mail requests `--notify` so the archivist gets a turn; the sender keeps
+working without waiting for its verdict. The archivist's verdicts and bounces are
+explicitly deferred calibration mail, without notification. The archivist and
+surveyor share `hindsight-coordination`: actionable questions, repair requests,
+incident reports and replies needed to continue a conversation notify their agent
+recipient. Tracked work returns through results and bead closure, without notified
+supplemental result mail. Other silent mail needs an explicit alternate wake
+mechanism or deferred-processing policy. Notification acceptance is not proof of
+arbitration or retention; use the result and durable receipts. See
+[workflow dispatch](OPERATIONS.md#archivist-workflow-dispatch) for pickup and recovery.
 
 The bank has two write paths, one per kind of truth:
 

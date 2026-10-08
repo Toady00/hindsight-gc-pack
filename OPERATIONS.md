@@ -88,6 +88,40 @@ even if that bead's foreground shipping command has begun. Resume mode avoids
 that deliberate claim-transition reset; explicit operator resets remain possible.
 After closing a root, the worker checks the hook again before going idle.
 
+Both pack roles receive `hindsight-coordination`: actionable agent mail and
+replies needed to continue a conversation request `--notify`; before yielding
+they check unread mail as well as
+routed work. A busy session may carry a cached inbox snapshot until its next
+input turn, and unread mail alone does not request that turn. Notification waits
+for idle delivery to a running session, but can explicitly wake a stopped session,
+cancel its waits and clear holds or wake backoff. Its receipt does not prove
+reading or execution. Watch for `nudge failed` or `no managed wake was requested`
+on stderr, or a missing/false `notified` on a new agent-addressed `--notify --json`
+send or reply, even after exit 0. Preserve the message ID and retry once with
+`gc session nudge <recipient> "Mail <id> needs action." --delivery wait-idle` rather
+than resending mail. If that fails or only queues without wake, record/report the
+undelivered handoff.
+
+Tracked work returns through persisted results and bead closure. Assignments
+request any supplemental result mail explicitly, without notification; requesters
+use completion waits or formula dependencies. Other silent mail must name another
+wake mechanism or deliberately allow deferred processing. A mail-plus-nudge outbox
+supplies its own notification. Arbitration verdicts and bounces are deferred
+calibration mail; they do not wake proposers or cancel their unrelated waits.
+Blocking questions can notify a requester with open delegated work. After
+answering, it must inspect its registered wait and restore it if that wake canceled
+the wait; otherwise later bead completion has no registered return.
+Mail to `human` has no managed session to wake. Memory proposals request notification
+even though their sender continues without awaiting arbitration.
+
+Plain sling pokes the controller. The bundled core `nudge-on-route` order prompts
+named agents to claim ready work, while pool pickup has a native claim backstop.
+Use `--nudge` when requesting immediate pickup or retrying a stalled route; do not
+inspect a recipient's queue to decide whether to wake it. An empty-queue check
+races the worker's last check. Follow the returned task's claim and receipt state.
+If ready work remains unclaimed, inspect route notification, queued nudges and
+session state rather than treating idle-timeout restart as normal delivery.
+
 Shipping attributes each attempt and confirmed receipt to the canonical claim
 on the session bead. `gc hindsight status --task <root-id>` returns those receipt
 summaries plus recent scan snapshots. A reset followed by a zero-write drain

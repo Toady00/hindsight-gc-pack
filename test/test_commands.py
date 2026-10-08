@@ -312,6 +312,7 @@ class GasCityCompatibilityTest(CommandFixture):
         prompt = self.render("widgets/reader")
         self.assertIn("# Fixture reader", prompt)
         self.assertIn("gc mail send hindsight.archivist", prompt)
+        self.assertIn("gc mail send hindsight.archivist --notify", prompt)
         command = self.reflect_command(prompt)
         result = self.run_command("bash", "-eu", "-c", command)
         self.assertEqual(result.stdout, "fixture reflection\n")
@@ -361,6 +362,14 @@ class GasCityCompatibilityTest(CommandFixture):
                      "HINDSIGHT_WRITER=archivist", "one at a time in the foreground",
                      "never pass that marker", "deny is the default"):
             self.assertIn(text, prompt)
+        self.assertEqual(prompt.count("## Agent handoffs"), 1)
+        self.assertIn("without `--notify`", prompt)
+
+    def test_surveyor_renders_coordination_without_arbitration_authority(self):
+        prompt = self.render("widgets/hindsight.surveyor")
+        self.assertEqual(prompt.count("## Agent handoffs"), 1)
+        self.assertIn("--notify", prompt)
+        self.assertNotIn("## Arbitrating memory proposals", prompt)
 
     def test_coordinator_briefs_and_fragment_gates(self):
         config = self.root / "agents/reader/agent.toml"

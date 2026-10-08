@@ -17,7 +17,7 @@ scope = "city"
 # the newly claimed task's foreground command is already running.
 wake_mode = "resume"
 work_dir = ".gc/agents/archivist"
-nudge = "Run gc hook --claim --json now; if it returns work, execute the claimed formula immediately."
+nudge = "Run gc hook --claim --json now; if it returns work, execute the claimed formula immediately. Before yielding, check unread mail and handle it through hindsight-coordination and hindsight-arbitrate."
 idle_timeout = "30m"
 max_active_sessions = 1
 env = { HINDSIGHT_WRITER = "archivist" }
@@ -25,4 +25,4 @@ env = { HINDSIGHT_WRITER = "archivist" }
 # The arbitration policy for agent memory proposals (see
 # template-fragments/hindsight.template.md). Consumers override by
 # defining hindsight-arbitrate-archivist in their own layer.
-append_fragments = ["hindsight-arbitrate"]
+append_fragments = ["hindsight-coordination", "hindsight-arbitrate"]

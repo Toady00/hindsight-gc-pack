@@ -19,4 +19,5 @@ wake_mode = "fresh"
 min_active_sessions = 0
 max_active_sessions = 1
 idle_timeout = "15m"
-nudge = "Run gc hook --claim --json now; if it returns work, execute the claimed step immediately."
+nudge = "Run gc hook --claim --json now; if it returns work, execute the claimed step immediately. Before yielding, check unread mail and handle it through hindsight-coordination."
+append_fragments = ["hindsight-coordination"]
