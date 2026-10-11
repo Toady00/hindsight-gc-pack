@@ -353,6 +353,7 @@ def main():
         # refuses both files, rather than retaining whichever happens to come first.
         candidates, items, seen, duplicates = {}, {}, set(), set()
         scanned = {}
+        legacy_references = set()
         for document in result["documents"]:
             display = f"{document['repo']}@{document['commit']}:{document['relpath']}"
             try:
@@ -372,7 +373,8 @@ def main():
             namespace = namespaces.get(repository, dict(key=None, error="repository namespace unresolved"))
             root = next(r for r in result["roots"] if r["repository"] == repository and r["status"] == "ok")
             history = RevisionHistory(root["toplevel"], root["commit"], derive, executable)
-            errors, warnings = publication.check_repository(namespace["key"], documents, history.lookup)
+            errors, warnings = publication.check_repository(namespace["key"], documents, history.lookup,
+                                                            history.is_legacy, legacy_references)
             problems = {}
             for relpath, message in errors:
                 problems.setdefault(relpath, []).append(message)
@@ -392,8 +394,18 @@ def main():
                             or verdict.get("reason", "schema refused"), display)
                     continue
                 try:
+                    legacy = [ref for ref in (verdict.get("lifecycle") or {}).get("assesses", [])
+                              if (document_id, ref["id"], ref["fingerprint"]) in legacy_references]
+                    if legacy:
+                        verdict = dict(verdict, context=(verdict.get("context") or "")
+                                       + f"; legacy assessed identities belong to historical Git in repository "
+                                       f"{document['repository']}, not renamed IDs or unqualified bank-document aliases")
                     item, source_hash, source = item_from(document, verdict)
                     candidates[document_id] = candidate_from(document, verdict, source_hash, namespace["key"])
+                    if legacy:
+                        provenance = [dict(ref, repository=document["repository"]) for ref in legacy]
+                        candidates[document_id]["legacy_assesses"] = provenance
+                        item["metadata"]["legacy_assesses"] = json.dumps(provenance, sort_keys=True)
                     items[document_id] = (item, source_hash, source, display)
                 except Error as error:
                     counts["failed"] += 1
@@ -449,7 +461,7 @@ def main():
         bank_hashes = {document_id: metadata.get("content_hash") or "" for document_id, metadata in bank_map.items()}
         staged = {i for i, state in states.items() if i not in records
                   and (state.get("publication_pending") or state.get("abandoned_attempt"))}
-        decisions, _ = publication.plan(candidates, records, bank_hashes, accepted_ids, staged)
+        decisions, _ = publication.plan(candidates, records, bank_hashes, accepted_ids, staged, legacy_references)
         for document_id, decision in sorted(decisions.items()):
             display = items[document_id][3]
             if decision.action == "hold":

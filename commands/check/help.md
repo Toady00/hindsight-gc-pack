@@ -39,6 +39,10 @@ From an external or sibling checkout, supply city context with `GC_CITY`, or run
   records. This proves existence, not approval, implementation or code-SHA validity.
   Working-tree-only matches can pass locally but must be committed and published
   before shipping. Shallow history must be fetched when an old pin is unavailable.
+  Legacy type-first assessed IDs can keep their exact identity only with matching
+  same-repository historical proof from before `.hindsight-namespace` existed.
+  Current document IDs, including the report's own ID, still require the namespace.
+  Adding a prefix to an old assessed ID names different content and is not a repair.
 
 `--fingerprint` prints `<fingerprint>  <id>  <path>` for shippable documents. The
 fingerprint hashes the file with only the values of `status` and `updated_at`

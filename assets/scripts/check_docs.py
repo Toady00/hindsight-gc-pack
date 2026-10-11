@@ -112,7 +112,7 @@ def main(argv=None):
         print(f"check: {error}", file=sys.stderr)
         return getattr(error, "code", 2) if isinstance(error, Error) else 2
     history = RevisionHistory(repo, args.rev or "HEAD", derive, executable)
-    found, warnings = publication.check_repository(namespace, documents, history.lookup)
+    found, warnings = publication.check_repository(namespace, documents, history.lookup, history.is_legacy)
     errors += [(r, m) for r, m in found if selected(r)]
     warnings = [(r, m) for r, m in warnings if selected(r)]
     documents = [d for d in documents if selected(d["relpath"])]

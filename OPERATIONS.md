@@ -320,6 +320,16 @@ the entire repository ancestry counts, including drafts and former docs location
 this establishes existence, not approval or implementation. Code commits are
 format-checked; the build workflow owns execution verification.
 
+For pre-namespace assessments, keep the historical document's exact ID and
+fingerprint. A type-first legacy ID is accepted only when selected same-repository
+ancestry proves the matching revision existed before `.hindsight-namespace` was
+declared. This does not relax namespaces for current publication or admit modern
+foreign namespaces. A replacement report still requires its own namespaced ID and
+valid `outcome`, `assesses` and `code`. Preserve the assessment; do not prefix its
+old spec IDs or pin the renamed current documents merely to pass validation.
+Independent namespace-adoption histories merged into one ancestry are ambiguous:
+legacy evidence must precede every initial declaration or validation fails closed.
+
 An assessment of revision A remains valid when accepted revision B publishes.
 B remains unassessed until a later report assesses it. No report is withdrawn
 because intent changes, and report pins do not govern intent eligibility.

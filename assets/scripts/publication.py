@@ -77,7 +77,7 @@ def id_error(document_id, namespace):
     return None
 
 
-def check_repository(namespace, documents, resolve_revision=None):
+def check_repository(namespace, documents, resolve_revision=None, resolve_legacy=None, legacy_references=None):
     """Read-only checks shared by `gc hindsight check` and the publisher.
 
     ``documents`` are dicts with ``relpath`` and the schema ``verdict``. Returns
@@ -127,8 +127,19 @@ def check_repository(namespace, documents, resolve_revision=None):
                 errors.append((document["relpath"], f"build report assesses discussion {ref['id']}; remove that "
                                "assesses entry and republish the report, because discussions add no requirements"))
             elif namespace is None or not ref["id"].startswith(namespace + "."):
-                errors.append((document["relpath"], f"{verdict['document_id']}: assessed {ref['id']} is outside "
-                               "this repository's namespace; reports pin only their own initiative's documents"))
+                try:
+                    legacy = (namespace is not None and kind is not None and resolve_legacy is not None
+                              and resolve_legacy(ref["id"], ref["fingerprint"]))
+                except (ValueError, OSError) as error:
+                    errors.append((document["relpath"], f"cannot verify legacy assessed revision {ref['id']}: {error}"))
+                    continue
+                if legacy:
+                    if legacy_references is not None:
+                        legacy_references.add((verdict["document_id"], ref["id"], ref["fingerprint"]))
+                else:
+                    errors.append((document["relpath"], f"{verdict['document_id']}: assessed {ref['id']} is outside "
+                                   "this repository's namespace and lacks exact pre-namespace historical proof; "
+                                   "preserve historical IDs and fingerprints rather than prefixing them"))
             elif kind is None:
                 errors.append((document["relpath"], f"{verdict['document_id']}: assessed revision {ref['id']} "
                                f"at {ref['fingerprint']} is not a valid current or historical document in this "
@@ -203,7 +214,7 @@ def classify(candidate, record, bank_hash, ever_accepted_in_git, staged=False):
     return Decision("publish", kind="status" if same else "content")
 
 
-def plan(candidates, records, bank_hashes, accepted_ids, staged=frozenset()):
+def plan(candidates, records, bank_hashes, accepted_ids, staged=frozenset(), legacy_references=frozenset()):
     """Decide each candidate independently after repository reference validation.
 
     ``staged`` holds IDs whose first publication this pipeline staged but never
@@ -226,7 +237,11 @@ def plan(candidates, records, bank_hashes, accepted_ids, staged=frozenset()):
     for document_id, candidate in candidates.items():
         if candidate["type"] != REPORT or decisions[document_id].action not in ("publish", "unchanged"):
             continue
-        outside = [ref for ref in _refs(candidate) if not ref.startswith(candidate["namespace"] + ".")]
+        # Legacy exemptions come from the repository history validator, never
+        # from author-supplied schema/frontmatter fields.
+        outside = [ref for ref, fp in _refs(candidate).items()
+                   if not ref.startswith(candidate["namespace"] + ".")
+                   and (document_id, ref, fp) not in legacy_references]
         discussions = [ref for ref, fp in _refs(candidate).items()
                        if any(entry.get("type") == "discussion" and entry.get("fingerprint") == fp
                               for entry in (candidates.get(ref) or {}, records.get(ref) or {}))]
@@ -260,6 +275,8 @@ def publication_record(candidate, record, set_id, at, ever_accepted_in_git=False
         result["moved_from"] = previous["relpath"]
     if candidate["type"] == REPORT:
         result["assesses"] = deepcopy(candidate.get("assesses") or [])
+        if candidate.get("legacy_assesses"):
+            result["legacy_assesses"] = deepcopy(candidate["legacy_assesses"])
         result["outcome"] = candidate.get("outcome")
         result["code"] = deepcopy(candidate.get("code") or [])
     return result

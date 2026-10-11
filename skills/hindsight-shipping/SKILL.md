@@ -152,6 +152,14 @@ The whole repository's Markdown history counts, including draft or moved source
 outside today's docs roots; this proves existence, not approval or implementation.
 Code SHAs are format-checked here; the producing workflow owns execution evidence.
 
+Legacy assessed identities are preserved, not renamed. An exact type-first ID such
+as `spec.ingestion.initial-ingestion-technical.0001` may appear in `assesses` only
+when the same repository's selected Git ancestry proves that ID/fingerprint
+existed before it declared `.hindsight-namespace`. This exception applies only to
+historical references. The report itself and all current publications still need
+namespaced IDs; report `outcome`, `assesses` and `code` remain required. Do not
+prefix old assessed IDs or recompute their fingerprints from renamed documents.
+
 Before pushing, run `gc hindsight check` (read-only; the shipper runs the same
 checks). `gc hindsight ship --dry-run` previews HELD and REFUSED decisions
 that depend on publication history.

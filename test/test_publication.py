@@ -475,6 +475,7 @@ class ShipFlowTest(unittest.TestCase):
         self.bank = Bank(self.store)
         self.files = {}
         self.history = {}
+        self.legacies = set()
         self.commit = "c" * 40
         self.accepted = []
         for name, value in (("BeadsStore", Mock(return_value=self.store)),
@@ -482,7 +483,8 @@ class ShipFlowTest(unittest.TestCase):
                             ("require_writer", Mock()), ("ship_lock", Mock(side_effect=lambda s: nullcontext())),
                              ("snapshot", Mock(side_effect=self.snapshot)),
                              ("RevisionHistory", Mock(side_effect=lambda *args: Mock(
-                                 lookup=lambda i, f: self.history.get((i, f))))),
+                                 lookup=lambda i, f: self.history.get((i, f)),
+                                 is_legacy=lambda i, f: (i, f) in self.legacies))),
                             ("load_registry", Mock(return_value=dict(city_name="city", rigs=[dict(name="alpha", path="/rig")]))),
                             ("owners", Mock(return_value={"/rig": "alpha"}))):
             p = patch.object(ship_docs, name, value)
@@ -754,6 +756,36 @@ class ShipFlowTest(unittest.TestCase):
         self.ship()
         self.assertEqual(self.bank.events, [])
 
+    def test_namespaced_report_preserves_attested_pre_namespace_assessed_identity(self):
+        self.doc("a", "accepted", "New accepted scope")
+        report = self.report("Prior partial assessment", "a")
+        old_id, old_fp = "spec.ingestion.initial-ingestion-technical.0001", "a" * 64
+        self.files["docs/omg.md"] = self.files["docs/omg.md"].replace("alpha.spec.a.0001", old_id)
+        self.files["docs/omg.md"] = self.files["docs/omg.md"].replace(self.fingerprint("a"), old_fp)
+        self.history[old_id, old_fp] = "spec"
+        self.legacies.add((old_id, old_fp))
+        self.ship()
+        self.assertEqual(self.published(report)["assesses"], [dict(id=old_id, fingerprint=old_fp)])
+        self.assertEqual(self.published(report)["legacy_assesses"],
+                         [dict(id=old_id, fingerprint=old_fp, repository=REPO)])
+        item = next(v["item"] for v in self.bank.operations.values() if v["item"]["document_id"] == report)
+        self.assertIn(REPO, item["context"])
+        self.assertEqual(json.loads(item["metadata"]["legacy_assesses"]),
+                         self.published(report)["legacy_assesses"])
+        self.assertNotIn(old_id, self.bank.docs)  # Referencing history does not publish a legacy document.
+        self.legacies.clear()
+        self.assertIn("lacks exact pre-namespace historical proof", self.ship(code=1))
+
+    def test_schema_cannot_self_authorize_a_foreign_assessed_identity(self):
+        self.doc("a", "accepted", "Scope")
+        self.report("Unsupported foreign assessment", "a")
+        fp = self.fingerprint("a")
+        self.files["docs/omg.md"] = self.files["docs/omg.md"].replace("alpha.spec.a.0001", "other.spec.a.0001")
+        self.files["docs/omg.md"] = self.files["docs/omg.md"].replace(
+            "outcome: partial", "outcome: partial\nlegacy_references: [other.spec.a.0001]")
+        self.history["other.spec.a.0001", fp] = "spec"
+        self.assertIn("lacks exact pre-namespace historical proof", self.ship(code=1))
+
     def test_prepared_legacy_withdrawal_is_not_replayed_and_report_is_restored(self):
         self.doc("a", "accepted", "R1 v1")
         report = self.report("R1 partially implemented", "a")
@@ -982,6 +1014,107 @@ class CheckCommandTest(unittest.TestCase):
         self.git("clone", "--depth=1", self.repo.as_uri(), str(shallow))
         self.repo = shallow
         self.assertIn("shallow Git history", self.check(code=1).stderr)
+
+    def test_pre_namespace_assessed_id_is_valid_without_renaming_history(self):
+        old_id = "spec.ingestion.initial-ingestion-technical.0001"
+        path = self.repo / "docs/a.md"
+        old = path.read_text().replace("alpha.spec.a.0001", old_id)
+        old_fp = ship_docs.derive(dict(content=old), DERIVE)["lifecycle"]["fingerprint"]
+        path.write_text(old)
+        (self.repo / ".hindsight-namespace").unlink()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "pre-namespace spec")
+        path.write_text(SchemaLifecycleTest.BASE.replace("Body", "New scope"))
+        (self.repo / ".hindsight-namespace").write_text("alpha\n")
+        self.write_report(old_id, old_fp)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "declare namespace and report historical work")
+        before = (self.repo / "docs/report.md").read_bytes()
+        self.check()
+        self.check("--rev", "HEAD")
+        self.assertEqual((self.repo / "docs/report.md").read_bytes(), before)
+        self.write_report(old_id, "f" * 64)
+        self.assertIn("lacks exact pre-namespace historical proof", self.check(code=1).stderr)
+        self.write_report(old_id, old_fp)
+        report = self.repo / "docs/report.md"
+        report.write_text(report.read_text().replace("id: alpha.build-report.one", "id: build-report.old"))
+        self.assertIn("must start with this repository's namespace", self.check(code=1).stderr)
+
+    def test_post_namespace_type_first_identity_is_not_a_legacy_exemption(self):
+        old_id = "spec.ingestion.initial-ingestion-technical.0001"
+        self.git("add", "-A")
+        self.git("commit", "-qm", "namespace established")
+        path = self.repo / "docs/a.md"
+        text = path.read_text().replace("alpha.spec.a.0001", old_id)
+        fp = ship_docs.derive(dict(content=text), DERIVE)["lifecycle"]["fingerprint"]
+        path.write_text(text)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "late unnamespaced identity")
+        path.write_text(SchemaLifecycleTest.BASE)
+        self.write_report(old_id, fp)
+        self.assertIn("lacks exact pre-namespace historical proof", self.check(code=1).stderr)
+
+    def test_foreign_namespace_in_pre_namespace_history_is_not_a_legacy_id(self):
+        foreign = SchemaLifecycleTest.BASE.replace("alpha.spec.a.0001", "other.spec.a.0001")
+        fp = ship_docs.derive(dict(content=foreign), DERIVE)["lifecycle"]["fingerprint"]
+        (self.repo / "docs/a.md").write_text(foreign)
+        (self.repo / ".hindsight-namespace").unlink()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "foreign-namespaced historical document")
+        (self.repo / "docs/a.md").write_text(SchemaLifecycleTest.BASE)
+        (self.repo / ".hindsight-namespace").write_text("alpha\n")
+        self.write_report("other.spec.a.0001", fp)
+        self.assertIn("lacks exact pre-namespace historical proof", self.check(code=1).stderr)
+
+    def test_namespace_removal_cannot_reset_a_modern_identity_lineage(self):
+        self.git("add", "-A")
+        self.git("commit", "-qm", "namespace established")
+        old_id = "spec.ingestion.initial-ingestion-technical.0001"
+        text = SchemaLifecycleTest.BASE.replace("alpha.spec.a.0001", old_id)
+        fp = ship_docs.derive(dict(content=text), DERIVE)["lifecycle"]["fingerprint"]
+        (self.repo / ".hindsight-namespace").unlink()
+        (self.repo / "docs/a.md").write_text(text)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "remove namespace and introduce old-style identity")
+        (self.repo / ".hindsight-namespace").write_text("alpha\n")
+        (self.repo / "docs/a.md").write_text(SchemaLifecycleTest.BASE)
+        self.write_report(old_id, fp)
+        self.assertIn("lacks exact pre-namespace historical proof", self.check(code=1).stderr)
+
+    def test_late_pre_adoption_branch_and_orphan_merge_are_not_legacy_evidence(self):
+        namespace = self.repo / ".hindsight-namespace"
+        namespace.unlink()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "pre-adoption root")
+        self.git("branch", "late-side")
+        self.git("checkout", "-qb", "adopted")
+        namespace.write_text("alpha\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "namespace adoption")
+        self.git("checkout", "late-side")
+        old_id = "spec.evil.0001"
+        text = SchemaLifecycleTest.BASE.replace("alpha.spec.a.0001", old_id)
+        fp = ship_docs.derive(dict(content=text), DERIVE)["lifecycle"]["fingerprint"]
+        (self.repo / "docs/late.md").write_text(text)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "late old-style identity")
+        self.git("checkout", "adopted")
+        self.git("merge", "--no-ff", "-m", "merge late side", "late-side")
+        self.write_report(old_id, fp)
+        self.assertIn("lacks exact pre-namespace historical proof", self.check(code=1).stderr)
+        (self.repo / "docs/report.md").unlink()
+        self.git("checkout", "--orphan", "late-orphan")
+        self.git("rm", "-rf", ".")
+        (self.repo / "docs").mkdir(exist_ok=True)
+        orphan = text.replace("spec.evil.0001", "spec.orphan.0001")
+        orphan_fp = ship_docs.derive(dict(content=orphan), DERIVE)["lifecycle"]["fingerprint"]
+        (self.repo / "docs/orphan.md").write_text(orphan)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "orphan old-style identity")
+        self.git("checkout", "adopted")
+        self.git("merge", "--allow-unrelated-histories", "--no-ff", "-m", "merge orphan", "late-orphan")
+        self.write_report("spec.orphan.0001", orphan_fp)
+        self.assertIn("lacks exact pre-namespace historical proof", self.check(code=1).stderr)
 
 
 if __name__ == "__main__":

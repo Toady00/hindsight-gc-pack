@@ -234,6 +234,12 @@ on every scan, validating the whole manifest before any write:
    necessarily the latest files or bank-visible content. Unknown fingerprints
    refuse the report without holding valid intent. Nothing withdraws reports
    because scope changes.
+
+   Legacy type-first assessed IDs retain their original fingerprints when exact
+   same-repository ancestry proves they predate namespace declaration. The report
+   itself remains namespaced and keeps required `outcome`, `assesses` and `code`.
+   Namespace removal does not reset this history. Do not prefix old assessed IDs
+   or recompute fingerprints from renamed current documents.
 4. **Retire and restore against published content.** `superseded`,
    `deprecated`, and restoring `accepted` publish immediately, but only when
    everything except `status` and `updated_at` matches the last *published*
