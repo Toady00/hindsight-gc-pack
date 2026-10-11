@@ -259,8 +259,9 @@
   multi-document transaction. Retain is per document and streaming; document
   transfer import commits per document; tag PATCH is per document and requeues
   consolidation. `DELETE /documents/{id}` is synchronous and also deletes
-  derived observations, which is what makes the withdraw → documents → reports
-  set order sound. Do not describe set publication as atomic. Mike Farah yq
+  derived observations. The former withdraw/documents/reports gate is retired:
+  intent and historical assessments now publish independently, and prepared
+  legacy withdrawals must not resume. Mike Farah yq
   emits duplicate YAML keys verbatim and JSON readers keep the last one, so the
   schema parses with a duplicate-rejecting hook; never relax that, or a second
   `status:` line could ride the fingerprint exemption. Unquoted all-digit SHAs

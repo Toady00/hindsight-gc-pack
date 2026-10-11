@@ -19,6 +19,8 @@ From an external or sibling checkout, supply city context with `GC_CITY`, or run
 
 - Every shippable document passes the schema (`schemas/docs/derive`), including
   duplicate frontmatter fields, which are refused rather than resolved silently.
+- Discussion records omit `status` entirely. Other types require it. Discussions
+  preserve conversation history, not approved scope, and cannot be report pins.
 - `.hindsight-namespace` at the repository root holds one key: the city or rig
   name, lowercased, using letters, digits, `_` or `-` (never `rig` or `city`).
 - Each document ID is `<namespace>.<document-id>`, with no literal `rig` or
@@ -26,13 +28,22 @@ From an external or sibling checkout, supply city context with `GC_CITY`, or run
   stable identity, not a revision counter.
 - IDs are unique in the repository, counting retired (superseded/deprecated)
   documents, which keep their IDs forever.
-- Build reports pin only documents in the same namespace. A pin that is not the
-  current file's fingerprint is a warning: the current file cannot publish until
-  the report pins it.
+- Build reports pin non-discussion document revisions in the same namespace.
+  Each ID/fingerprint pair must match a valid current document or a historical
+  Markdown blob reachable from the selected commit, including moved or deleted
+  documents. A report need not assess the latest files or bank-visible revisions.
+  Unknown fingerprints are errors, not permission to rewrite a report's pins.
+  Historical lookup covers Markdown throughout that repository's ancestry,
+  including drafts outside today's docs roots. It verifies recorded identity,
+  type and exact fingerprint, without applying today's required fields to old
+  records. This proves existence, not approval, implementation or code-SHA validity.
+  Working-tree-only matches can pass locally but must be committed and published
+  before shipping. Shallow history must be fetched when an old pin is unavailable.
 
 `--fingerprint` prints `<fingerprint>  <id>  <path>` for shippable documents. The
 fingerprint hashes the file with only the values of `status` and `updated_at`
-masked. Build reports pin it in `assesses`.
+masked. Discussions omit status, so only `updated_at` is masked for them.
+Build reports pin non-discussion documents in `assesses`.
 
 Exit codes: `0` clean (warnings allowed), `1` contract violations, each printed
 with repair guidance, `2` invalid invocation or missing tools.
@@ -42,7 +53,7 @@ with repair guidance, `2` invalid invocation or missing tools.
 Publication history lives in the city's publication records, so only the
 publisher enforces: drafts after first acceptance staying unpublished, frozen
 superseded/deprecated content, status-only changes against the last published
-content, namespace ownership across repositories, and the build-report gate.
+content and namespace ownership across repositories. Reports and intent publish independently.
 `gc hindsight ship --dry-run` previews those decisions.
 
 ## Optional wiring

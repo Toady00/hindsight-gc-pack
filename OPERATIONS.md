@@ -1,20 +1,21 @@
 # Operating the memory pack
 
-The default docs schema now requires `status` on every document. `type` still
+The default docs schema requires `status` on every non-discussion document. `type` still
 selects extraction strategy. `status` records draft, accepted, superseded, or
 deprecated. These are separate decisions. Accepting a survey records its
 standing as an observation; it does not make its contents a platform decision.
 Accepting a voice memo does not turn thinking into an adopted plan.
 
 Required fields are `id`, `type`, `title`, `status`, `source`, `scope`, and
-`updated_at`. Timestamps must be valid RFC 3339 values with a timezone. Repos
+`updated_at`, except discussion records must omit `status`. Timestamps must be valid RFC 3339 values with a timezone. Repos
 and domains must be arrays of nonempty tag values. Repo-scoped documents need
 at least one repo. If present, `schema_version` must be 2. A document with
 schema markers but missing required fields is refused, not silently skipped.
 The raw `null` dialect and custom schema verdicts must also carry exactly one
-valid `status:` tag; their remaining vocabulary stays operator-owned.
+valid `status:` tag, except an explicit `lifecycle.type: discussion` must omit
+both lifecycle status and status tags; remaining vocabulary stays operator-owned.
 
-Existing documents without status need a deliberate source edit. Choose the
+Existing non-discussion documents without status need a deliberate source edit. Choose the
 status; do not assign `accepted` in bulk to get past validation. This also
 applies to survey producers: older producers that omit `status` need an
 explicit update. Do not bypass validation or infer acceptance. No automatic
@@ -22,6 +23,19 @@ migration changes documents or the bank. Existing bank-native memories without
 status require `gc hindsight retain --bump --id <id> --status <chosen-status>`.
 New arbitrated memories default to accepted because the archivist has accepted
 the proposal. Type and source continue to qualify what that acceptance means.
+
+Discussion records ship without acceptance and never become accepted, superseded
+or deprecated. Preserve dated reasoning and deferred ideas when scope narrows;
+later records can revisit them. Hindsight handles temporal context. Their content
+is evidence of conversation, not approved scope or implementation, and reports
+cannot pin it. Migrate a legacy discussion by removing its `status` field while
+preserving ID, provenance and history. The next publication replaces legacy status
+tags and metadata even if old Git history or receipts marked it accepted or retired.
+Bank-native discussion bumps need no `--status` and reject an explicit one.
+If a legacy build report pins a discussion, remove that discussion entry from
+`assesses` and republish the report with its valid intent pins. Until repaired,
+the report is refused and scans remain incomplete, but valid intent can still
+publish independently. In OMG, the next maintained build report must omit those discussion pins.
 
 ## Shipping and connection settings
 
@@ -293,17 +307,35 @@ accepted, or whether a status change applies to the same content. Establishing
 such a baseline is a deliberate, inspected operator action against the exact
 published Git revision; the pack ships no migration tooling.
 
-`hindsight-publication-set` records list a set's members, target fingerprints,
-the reports withdrawn first, and `state` (`publishing`, `published`,
-`incomplete`). A withdrawal is recorded on the report as `withdrawal` before the
-DELETE and completes only when the document is confirmed absent; the next scan
-resumes an interrupted one. An `incomplete` set is resumed by the next scan with
-the same inputs and is marked `published` once every member's record matches.
-Withdrawn reports stay out of the bank, with their last pins still governing,
-until a consistent replacement publishes. Report records keep `governs`, every
-document they have ever pinned; dropping a pin or retiring the report releases
-none of them. A failed attempt for a revision the current plan no longer selects
-is moved to `abandoned_attempt` instead of being retried.
+Intent and assessments publish independently. Report references identify exact
+current or historical Git revisions in the same repository namespace,
+not necessarily the latest files or bank content. The checker searches ancestors
+of `--rev`, or HEAD for working-tree checks; shipping searches the fetched canonical
+commit's ancestors, excluding private branches. Invalid or unavailable references
+refuse the report, without holding valid intent. Full Git history is needed for
+old references; fetch missing history before retrying a refused report.
+Historical lookup checks recorded identity/type, duplicate-free frontmatter and
+the exact fingerprint, rather than today's required-field policy. Markdown from
+the entire repository ancestry counts, including drafts and former docs locations;
+this establishes existence, not approval or implementation. Code commits are
+format-checked; the build workflow owns execution verification.
+
+An assessment of revision A remains valid when accepted revision B publishes.
+B remains unassessed until a later report assesses it. No report is withdrawn
+because intent changes, and report pins do not govern intent eligibility.
+Legacy `governs`, set IDs and `hindsight-publication-set` records are audit history.
+Prepared legacy withdrawals are not resumed. An eligible report missing from the
+bank is restored through ordinary publication; incomplete legacy sets become
+`replaced` on a full scan. Per-document receipts and pending retains still recover
+normally. A failed attempt for a revision the current plan no longer selects is
+moved to `abandoned_attempt` instead of being retried.
+
+Retained documents now carry their lifecycle fingerprint in metadata and context,
+so readers can compare current intent with a report's historical references.
+The first scan after this derivation update re-retains existing documents once
+to add that data, with extraction cost. Later unrelated branch commits do not
+change the payload or trigger another retain. `source_commit` metadata identifies
+the fetched snapshot supplying the bytes, not the file's last-change commit.
 
 A bank `document_metadata.content_hash` alone does not prove completion: a failed
 streaming retain can already have stamped it. Skipping requires a matching

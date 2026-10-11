@@ -3,7 +3,8 @@
 
 ``validate`` checks parsed frontmatter. ``fingerprint`` identifies a revision
 for the publication lifecycle: the exact file bytes with only the values of the
-top-level ``status`` and ``updated_at`` lines masked. Everything else, including
+top-level ``status`` and ``updated_at`` lines masked. Discussions omit status,
+so only their updated_at value is masked. Everything else, including
 ``source``, ``id``, comments, and the body, stays significant.
 """
 from datetime import datetime
@@ -48,7 +49,7 @@ def strict_json(text):
 
 def _report(doc):
     outcome, assesses, code = (doc.get(k) for k in REPORT_FIELDS)
-    if outcome not in OUTCOMES:
+    if not isinstance(outcome, str) or outcome not in OUTCOMES:
         raise ValueError("build-report outcome must be passed, partial or failed")
     if not isinstance(assesses, list) or not assesses:
         raise ValueError("build-report assesses must list the exact document revisions it assessed")
@@ -80,7 +81,7 @@ def validate(doc):
         raise ValueError("frontmatter must be an object")
     if not any(k in doc for k in ("schema_version", "id", "type")):
         return {"verdict": "skip"}
-    for field in ("id", "type", "title", "status", "source", "scope", "updated_at"):
+    for field in ("id", "type", "title", "source", "scope", "updated_at"):
         if not isinstance(doc.get(field), str) or not doc[field].strip():
             raise ValueError(f"missing or non-string {field}")
     if "schema_version" in doc and (type(doc["schema_version"]) is not int or doc["schema_version"] != 2):
@@ -90,7 +91,12 @@ def validate(doc):
     kind = doc["type"]
     if kind not in STRATEGIES:
         raise ValueError(f"unknown type '{kind}'")
-    for field, values in (("status", STATUS), ("scope", {"business", "platform", "repo"}), ("source", {"human", "agent", "external"})):
+    if kind == "discussion":
+        if "status" in doc:
+            raise ValueError("discussion records must omit status")
+    elif not isinstance(doc.get("status"), str) or doc["status"] not in STATUS:
+        raise ValueError("missing or invalid status")
+    for field, values in (("scope", {"business", "platform", "repo"}), ("source", {"human", "agent", "external"})):
         if doc[field] not in values:
             raise ValueError(f"bad {field} '{doc[field]}'")
     for field in ("updated_at", "created_at"):
@@ -135,22 +141,31 @@ def validate(doc):
     if report:
         # Evidence of what was built, never approval of intent or deployment.
         context += (f"; IMPLEMENTATION EVIDENCE, build outcome {report['outcome'].upper()}; assesses "
-                    + ", ".join(e["id"] for e in report["assesses"])
+                    + ", ".join(f"{e['id']} at fingerprint {e['fingerprint']}" for e in report["assesses"])
+                    + "; code " + ", ".join(f"{e['repo']} at {e['commit']}" for e in report["code"])
+                    + "; may assess historical intent; newer scope is unassessed unless explicitly assessed"
                     + "; not approval, deployment, or proof that every target requirement shipped")
     if domains:
         context += "; domain " + ", ".join(domains)
     if repos:
         context += "; repo " + ", ".join(repos)
-    context += {
+    if kind == "discussion":
+        context += "; DISCUSSION record, conversation history including deferred ideas; not approved direction or implementation evidence"
+    else:
+        context += {
         "draft": "; DRAFT assessment, not human-reviewed" if report else "; DRAFT, not current platform direction",
         "accepted": "; ACCEPTED record; its document type determines what it establishes",
         "superseded": "; SUPERSEDED, retained as history, not current platform direction",
         "deprecated": "; DEPRECATED, no longer holds",
-    }[doc["status"]]
+        }[doc["status"]]
     tags = ([f"scope:{doc['scope']}"] + [f"repo:{v}" for v in repos] + [f"domain:{v}" for v in domains]
-            + [f"memory_type:{kind}", f"source:{doc['source']}", f"status:{doc['status']}"])
+            + [f"memory_type:{kind}", f"source:{doc['source']}"])
+    if kind != "discussion":
+        tags.append(f"status:{doc['status']}")
     scopes = [[f"domain:{v}"] for v in domains] + [[f"repo:{v}"] for v in repos] + [[f"scope:{doc['scope']}"]]
-    lifecycle = dict(status=doc["status"], type=kind)
+    lifecycle = dict(type=kind)
+    if kind != "discussion":
+        lifecycle["status"] = doc["status"]
     if report:
         lifecycle.update(report)
     return dict(verdict="ship", document_id=doc["id"], strategy=STRATEGIES[kind], tags=tags,
@@ -167,24 +182,18 @@ def _yq(text):
     return strict_json(result.stdout)
 
 
-def fingerprint(text, parsed, parse=_yq):
-    """Hash the file with only the status and updated_at values masked.
-
-    Each masked field must be exactly one plain top-level ``key: value`` line in
-    the frontmatter. The masked text is parsed again and must equal the original
-    frontmatter with only those two values replaced, so a block scalar, a quoted
-    or flow-mapped duplicate, or a boundary disagreement cannot widen the mask.
-    """
+def masked_text(text, masked_fields):
+    """Apply the narrow lexical mask; callers must verify parsed equivalence."""
     lines = text.splitlines(keepends=True)
     if not lines or not re.fullmatch(r"---[ \t]*\r?\n?", lines[0]):
         raise ValueError("fingerprint requires YAML frontmatter")
     end = next((i for i in range(1, len(lines)) if re.fullmatch(r"---[ \t]*\r?\n?", lines[i])), None)
     if end is None:
         raise ValueError("unterminated frontmatter")
-    found = {key: [] for key in MASKED}
+    found = {key: [] for key in masked_fields}
     for index in range(1, end):
         match = re.match(r"(status|updated_at)[ \t]*:", lines[index])
-        if match:
+        if match and match.group(1) in found:
             found[match.group(1)].append(index)
     for key, indexes in found.items():
         if len(indexes) != 1:
@@ -195,11 +204,46 @@ def fingerprint(text, parsed, parse=_yq):
         if not match:
             raise ValueError(f"{key} must be a single-line scalar")
         lines[index] = match.group(1) + MASK + match.group(3)
-    masked = "".join(lines)
-    expected = dict(parsed, **{key: MASK for key in MASKED})
+    return "".join(lines)
+
+
+def fingerprint(text, parsed, parse=_yq, masked_fields=None):
+    """Hash the file with only the status and updated_at values masked.
+
+    Each masked field must be exactly one plain top-level ``key: value`` line in
+    the frontmatter. The masked text is parsed again and must equal the original
+    frontmatter with only those two values replaced, so a block scalar, a quoted
+    or flow-mapped duplicate, or a boundary disagreement cannot widen the mask.
+    """
+    if masked_fields is None:
+        masked_fields = ("updated_at",) if parsed.get("type") == "discussion" else MASKED
+    masked = masked_text(text, masked_fields)
+    expected = dict(parsed, **{key: MASK for key in masked_fields})
     if parse(masked) != expected:
         raise ValueError("status and updated_at must be plain single-line top-level frontmatter values")
     return hashlib.sha256(masked.encode("utf-8")).hexdigest()
+
+
+def historical_revision(text, parsed, wanted):
+    """Prove recorded identity/type and fingerprint, without revalidating old policy.
+
+    Old scope/source/report fields can predate today's contract. Duplicate keys
+    and masked-value ambiguity still fail closed. Whole-file hashes support old
+    adapters that emitted no lifecycle fingerprint.
+    """
+    if not isinstance(parsed, dict):
+        raise ValueError("historical frontmatter must be an object")
+    identity, kind = parsed.get("id"), parsed.get("type")
+    if not isinstance(identity, str) or not ATOM.fullmatch(identity) or not isinstance(kind, str) or kind not in STRATEGIES:
+        raise ValueError("historical revision needs a stable ID and known document type")
+    fields = MASKED if kind != "discussion" or "status" in parsed else ("updated_at",)
+    try:
+        actual = fingerprint(text, parsed, masked_fields=fields)
+    except ValueError:
+        actual = hashlib.sha256(text.encode()).hexdigest()
+    if actual != wanted:
+        raise ValueError("historical fingerprint does not match")
+    return identity, kind
 
 
 if __name__ == "__main__":

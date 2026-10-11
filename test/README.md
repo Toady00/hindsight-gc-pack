@@ -20,7 +20,7 @@ not to repeat the ingestion state machine.
 | Tests | Responsibility |
 |---|---|
 | `test_ingestion.py` | Recovery, receipts, lost acknowledgements, child extraction errors, Beads and HTTP contracts |
-| `test_publication.py` | Publication lifecycle: per-document gates, frozen content, fingerprints, namespaces and claims, build-report sets, withdrawal, interruption and resume, the read-only check command |
+| `test_publication.py` | Independent publication, historical fingerprints and Git ancestry, frozen content, namespaces and claims, partial failures, legacy restoration and the read-only check command |
 | In-process classes in `test_pack.py` | Schema, shipping orchestration, scan health, GONE boundaries, request validation |
 | `MemoryCLITest` | Memory payload hashes, deliberate reports, recovery markers and errors |
 | `test_git_snapshot.py` | Real Git publication branches, fetch failures, immutable snapshots, worktrees |

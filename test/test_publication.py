@@ -2,6 +2,7 @@
 from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from copy import deepcopy
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -67,6 +68,51 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual((accepted[spec].action, accepted[spec].kind), ("publish", "status"))
         self.assertEqual(sets, [])
 
+    def test_discussion_migrates_legacy_status_without_acceptance_or_report_gate(self):
+        document_id = "alpha.discussion.a.0001"
+        current = candidate(document_id, FP["b"], kind="discussion")
+        current.pop("status")
+        report_id = "alpha.build-report.legacy"
+        for status in ["draft", "accepted", "superseded", "deprecated"]:
+            with self.subTest(status=status):
+                legacy = dict(current, status=status, fingerprint=FP["a"], source_hash=FP["a"])
+                # Old publications may have erroneously classified or pinned a discussion.
+                published = {document_id: dict(record(current), **legacy, ever_accepted=True),
+                             report_id: record(candidate(report_id, FP["e"], kind="build-report",
+                                                         assesses={document_id: FP["a"]}))}
+                decisions, sets = self.plan({document_id: current}, published, {document_id})
+                self.assertEqual(decisions[document_id].action, "publish")
+                self.assertEqual(sets, [])
+                updated = publication.publication_record(current, published[document_id], None, "now", True)
+                self.assertNotIn("status", updated)
+                self.assertNotIn("ever_accepted", updated)
+        self.assertEqual(self.plan({document_id: current}, accepted={document_id})[0][document_id].action, "publish")
+
+    def test_reports_cannot_pin_discussions(self):
+        document_id, report_id = "alpha.discussion.a.0001", "alpha.build-report.one"
+        discussion = candidate(document_id, FP["a"], kind="discussion")
+        discussion.pop("status")
+        report = candidate(report_id, FP["e"], kind="build-report", assesses={document_id: FP["a"]})
+        decisions, _ = self.plan({document_id: discussion, report_id: report})
+        self.assertEqual(decisions[report_id].action, "refuse")
+        self.assertEqual(decisions[document_id].action, "publish")
+
+    def test_legacy_report_in_git_must_drop_discussion_pins_before_publishing(self):
+        discussion_id, spec_id, report_id = "alpha.discussion.a.0001", "alpha.spec.a.0001", "alpha.build-report.one"
+        discussion = candidate(discussion_id, FP["a"], kind="discussion")
+        discussion.pop("status")
+        spec = candidate(spec_id, FP["b"], "accepted")
+        report = candidate(report_id, FP["e"], kind="build-report",
+                           assesses={discussion_id: FP["a"], spec_id: FP["b"]})
+        published = {i: record(c) for i, c in [(discussion_id, discussion), (spec_id, spec), (report_id, report)]}
+        candidates = {discussion_id: discussion, spec_id: spec, report_id: report}
+        decision = self.plan(candidates, published)[0][report_id]
+        self.assertEqual(decision.action, "refuse")
+        self.assertIn(discussion_id, decision.reason)
+        self.assertIn("remove those assesses entries", decision.reason)
+        candidates[report_id] = candidate(report_id, FP["f"], kind="build-report", assesses={spec_id: FP["b"]})
+        self.assertEqual(self.plan(candidates, published)[0][report_id].action, "publish")
+
     def test_drafts_after_acceptance_keep_the_last_eligible_revision(self):
         spec = "alpha.spec.a.0001"
         published = {spec: record(candidate(spec, FP["a"], "accepted"))}
@@ -83,28 +129,26 @@ class PolicyTest(unittest.TestCase):
         # Reacceptance of new content publishes when no report governs it.
         self.assertEqual(self.plan({spec: candidate(spec, FP["b"], "accepted")}, published)[0][spec].action, "publish")
 
-    def test_report_gate_requires_an_updated_report_in_the_same_set(self):
+    def test_new_accepted_intent_and_historical_reports_publish_independently(self):
         spec, prd, report = "alpha.spec.a.0001", "alpha.prd.a.0001", "alpha.build-report.omg-1"
         old_spec, old_prd = candidate(spec, FP["a"], "accepted"), candidate(prd, FP["c"], "accepted")
         old_report = candidate(report, FP["e"], kind=publication.REPORT, assesses={spec: FP["a"], prd: FP["c"]})
         published = {spec: record(old_spec), prd: record(old_prd), report: record(old_report)}
         new_spec = candidate(spec, FP["b"], "accepted")
-        # Acceptance alone never unlocks the gate.
+        # An old partial assessment stays valid when accepted scope changes.
         decisions, sets = self.plan({spec: new_spec, prd: old_prd, report: old_report}, published)
-        self.assertEqual(decisions[spec].action, "hold")
-        self.assertIn(report, decisions[spec].reason)
+        self.assertEqual(decisions[spec].action, "publish")
+        self.assertEqual(decisions[report].action, "unchanged")
         self.assertEqual(sets, [])
         new_report = candidate(report, FP["f"], kind=publication.REPORT, assesses={spec: FP["b"], prd: FP["c"]})
         decisions, sets = self.plan({spec: new_spec, prd: old_prd, report: new_report}, published)
         self.assertEqual(actions(decisions), {spec: "publish", prd: "unchanged", report: "publish"})
-        self.assertEqual(len(sets), 1)
-        self.assertEqual((sets[0]["withdraw"], sets[0]["documents"], sets[0]["reports"]), ([report], [spec], [report]))
-        self.assertEqual(decisions[spec].set_id, decisions[report].set_id)
-        # A report pinning a revision the bank will not hold cannot publish.
+        self.assertEqual(sets, [])
+        # A verified Git revision need not be the bank's current revision.
         draft_edit = candidate(spec, FP["d"])
         wrong = candidate(report, FP["f"], kind=publication.REPORT, assesses={spec: FP["d"], prd: FP["c"]})
         decisions, _ = self.plan({spec: draft_edit, prd: old_prd, report: wrong}, published)
-        self.assertEqual((decisions[spec].action, decisions[report].action), ("hold", "hold"))
+        self.assertEqual((decisions[spec].action, decisions[report].action), ("hold", "publish"))
 
     def test_report_correction_and_new_proposals_publish_without_a_build(self):
         spec, report, proposal = "alpha.spec.a.0001", "alpha.build-report.omg-1", "alpha.spec.next.0001"
@@ -119,7 +163,7 @@ class PolicyTest(unittest.TestCase):
         retired = self.plan({spec: candidate(spec, FP["a"], "deprecated"), report: old_report}, published)[0]
         self.assertEqual((retired[spec].action, retired[spec].kind), ("publish", "status"))
 
-    def test_every_governing_report_must_move_and_retiring_a_report_releases_nothing(self):
+    def test_old_and_retired_reports_do_not_gate_intent(self):
         spec, first, second = "alpha.spec.a.0001", "alpha.build-report.one", "alpha.build-report.two"
         old_spec = candidate(spec, FP["a"], "accepted")
         reports = {r: candidate(r, FP["e"], kind=publication.REPORT, assesses={spec: FP["a"]}, source=r.ljust(64, "x"))
@@ -128,38 +172,35 @@ class PolicyTest(unittest.TestCase):
         new_spec = candidate(spec, FP["b"], "accepted")
         updated = candidate(first, FP["f"], kind=publication.REPORT, assesses={spec: FP["b"]})
         decisions, _ = self.plan({spec: new_spec, first: updated, second: reports[second]}, published)
-        self.assertEqual((decisions[spec].action, decisions[first].action), ("hold", "hold"))
-        self.assertIn(second, decisions[spec].reason)
-        # Retiring the second report is a status-only change, but it still governs.
+        self.assertEqual((decisions[spec].action, decisions[first].action), ("publish", "publish"))
+        # Retirement changes the report's standing, not intent eligibility.
         published[second]["status"] = "deprecated"
         decisions, sets = self.plan({spec: new_spec, first: updated, second: dict(reports[second], status="deprecated")},
                                     published)
-        self.assertEqual(decisions[spec].action, "hold")
-        self.assertIn(second, decisions[spec].reason)
-        # Both reports moving to the new revision releases it.
+        self.assertEqual(decisions[spec].action, "publish")
         second_updated = candidate(second, FP["f"], kind=publication.REPORT, assesses={spec: FP["b"]},
                                    source="z" * 64)
         published[second]["status"] = "draft"
         decisions, sets = self.plan({spec: new_spec, first: updated, second: second_updated}, published)
         self.assertEqual(actions(decisions), {spec: "publish", first: "publish", second: "publish"})
-        self.assertEqual(sets[0]["withdraw"], [first, second])
+        self.assertEqual(sets, [])
 
-    def test_an_update_that_drops_a_pin_does_not_release_it(self):
+    def test_a_report_correction_does_not_govern_former_pins(self):
         spec, prd, report = "alpha.spec.a.0001", "alpha.prd.a.0001", "alpha.build-report.one"
         published = {spec: record(candidate(spec, FP["a"], "accepted")), prd: record(candidate(prd, FP["c"], "accepted")),
                      report: record(candidate(report, FP["e"], kind=publication.REPORT, assesses={spec: FP["a"], prd: FP["c"]}))}
         dropped = candidate(report, FP["f"], kind=publication.REPORT, assesses={prd: FP["c"]})
         decisions, sets = self.plan({spec: candidate(spec, FP["b"], "accepted"), prd: candidate(prd, FP["c"], "accepted"),
                                      report: dropped}, published)
-        self.assertEqual(decisions[spec].action, "hold")
+        self.assertEqual(decisions[spec].action, "publish")
         self.assertEqual(decisions[report].action, "publish")  # a correction of what it still pins
         self.assertEqual(sets, [])
 
-    def test_withdrawn_report_still_governs_until_its_replacement_publishes(self):
+    def test_legacy_withdrawn_report_does_not_gate_intent(self):
         spec, report = "alpha.spec.a.0001", "alpha.build-report.one"
         report_record = record(candidate(report, FP["e"], kind=publication.REPORT, assesses={spec: FP["a"]}), visible=False)
         published = {spec: record(candidate(spec, FP["b"], "accepted")), report: report_record}
-        self.assertEqual(self.plan({spec: candidate(spec, FP["c"], "accepted")}, published)[0][spec].action, "hold")
+        self.assertEqual(self.plan({spec: candidate(spec, FP["c"], "accepted")}, published)[0][spec].action, "publish")
         resumed = candidate(report, FP["f"], kind=publication.REPORT, assesses={spec: FP["b"]})
         decisions, sets = self.plan({spec: candidate(spec, FP["b"], "accepted"), report: resumed}, published)
         self.assertEqual(actions(decisions), {spec: "unchanged", report: "publish"})
@@ -222,13 +263,13 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(decision.action, "refuse")
         self.assertIn("own initiative", decision.reason)
 
-    def test_first_publication_of_a_set_orders_documents_before_their_report(self):
+    def test_first_publication_needs_no_coupled_set(self):
         spec, report = "alpha.spec.a.0001", "alpha.build-report.one"
         decisions, sets = self.plan({
             spec: candidate(spec, FP["a"], "accepted"),
             report: candidate(report, FP["e"], kind=publication.REPORT, assesses={spec: FP["a"]})})
         self.assertEqual(actions(decisions), {spec: "publish", report: "publish"})
-        self.assertEqual(sets[0], dict(set_id=sets[0]["set_id"], documents=[spec], reports=[report], withdraw=[]))
+        self.assertEqual(sets, [])
 
 
 class SchemaLifecycleTest(unittest.TestCase):
@@ -243,6 +284,21 @@ class SchemaLifecycleTest(unittest.TestCase):
         verdict = self.derive(text)
         self.assertEqual(verdict["verdict"], "ship", verdict)
         return verdict["lifecycle"]["fingerprint"]
+
+    def test_status_free_discussion_context_tags_and_fingerprint(self):
+        text = self.BASE.replace("type: spec", "type: discussion").replace("status: draft  # note\n", "")
+        verdict = self.derive(text)
+        self.assertEqual(verdict["verdict"], "ship", verdict)
+        self.assertNotIn("status", verdict["lifecycle"])
+        self.assertFalse(any(t.startswith("status:") for t in verdict["tags"]))
+        self.assertIn("conversation history", verdict["context"])
+        self.assertIn("not approved direction", verdict["context"])
+        self.assertEqual(self.fingerprint(text), self.fingerprint(text.replace("08-20T00", "09-01T07")))
+        self.assertNotEqual(self.fingerprint(text), self.fingerprint(text + "Later: defer R2.\n"))
+        for status in ["draft", "accepted", "superseded", "deprecated", "null", "recorded"]:
+            with self.subTest(status=status):
+                bad = text.replace("type: discussion\n", f"type: discussion\nstatus: {status}\n")
+                self.assertEqual(self.derive(bad)["verdict"], "refuse")
 
     def test_only_status_and_updated_at_values_are_masked(self):
         base = self.fingerprint(self.BASE)
@@ -418,11 +474,15 @@ class ShipFlowTest(unittest.TestCase):
         self.store = Store()
         self.bank = Bank(self.store)
         self.files = {}
+        self.history = {}
+        self.commit = "c" * 40
         self.accepted = []
         for name, value in (("BeadsStore", Mock(return_value=self.store)),
                             ("API", Mock(return_value=self.bank)),
                             ("require_writer", Mock()), ("ship_lock", Mock(side_effect=lambda s: nullcontext())),
-                            ("snapshot", Mock(side_effect=self.snapshot)),
+                             ("snapshot", Mock(side_effect=self.snapshot)),
+                             ("RevisionHistory", Mock(side_effect=lambda *args: Mock(
+                                 lookup=lambda i, f: self.history.get((i, f))))),
                             ("load_registry", Mock(return_value=dict(city_name="city", rigs=[dict(name="alpha", path="/rig")]))),
                             ("owners", Mock(return_value={"/rig": "alpha"}))):
             p = patch.object(ship_docs, name, value)
@@ -436,10 +496,15 @@ class ShipFlowTest(unittest.TestCase):
 
     def snapshot(self, roots, ref):
         root = dict(root="/rig/docs", status="ok", detail="", repo="rig", repository=REPO, prefix="docs",
-                    ref="refs/heads/main", commit="c" * 40, toplevel="/rig", namespace="alpha\n",
+                    ref="refs/heads/main", commit=self.commit, toplevel="/rig", namespace="alpha\n",
                     accepted_ids=list(self.accepted))
         documents = [dict(content=text, repo="rig", repository=REPO, relpath=path, ref=root["ref"],
                           commit=root["commit"], root=root["root"]) for path, text in sorted(self.files.items())]
+        for document in documents:
+            verdict = ship_docs.derive(document, DERIVE)
+            if verdict["verdict"] == "ship":
+                lifecycle = verdict["lifecycle"]
+                self.history[verdict["document_id"], lifecycle["fingerprint"]] = lifecycle["type"]
         return dict(roots=[root], documents=documents, errors=0)
 
     def doc(self, name, status, body, kind="spec", extra=""):
@@ -467,32 +532,60 @@ class ShipFlowTest(unittest.TestCase):
     def published(self, document_id):
         return self.store.get("document", document_id)["publication"]
 
-    def test_build_iteration_publishes_report_and_specs_in_order(self):
+    def test_discussion_ships_repeatedly_while_accepted_intent_drafts_are_held(self):
+        discussion = self.doc("conversation", "draft", "Discuss R1 and R2", kind="discussion")
+        path = "docs/conversation.md"
+        self.files[path] = self.files[path].replace("status: draft\n", "")
+        spec = self.doc("a", "accepted", "Build only R1")
+        self.accepted.append(discussion)  # A legacy accepted revision in published Git.
+        self.ship()
+        self.assertNotIn("status", self.published(discussion))
+        self.bank.events.clear()
+        self.files[path] += "Later: R2 is deferred, preserve its earlier rationale.\n"
+        self.doc("a", "draft", "Unapproved R1 revision")
+        self.assertIn("HELD", self.ship())
+        self.assertEqual(self.bank.events, [("retain", discussion)])
+        item = next(v["item"] for v in reversed(list(self.bank.operations.values()))
+                    if v["item"]["document_id"] == discussion)
+        self.assertIn("R2 is deferred", item["content"])
+        self.assertFalse(any(t.startswith("status:") for t in item["tags"]))
+        self.assertEqual(self.published(spec)["status"], "accepted")
+
+    def test_partial_assessment_remains_valid_as_accepted_scope_changes(self):
         spec = self.doc("a", "accepted", "R1 v1")
         report = self.report("R1 implemented", "a")
         self.ship()
         self.assertEqual(self.bank.events, [("retain", spec), ("retain", report)])
         self.assertEqual(self.store.get("namespace", "alpha")["repository"], REPO)
         self.assertTrue(self.published(spec)["ever_accepted"])
-        set_id = self.published(report)["set"]
-        self.assertEqual(self.store.get("set", set_id)["state"], "published")
-        # Revise after acceptance: the draft does not publish; nor does reacceptance alone.
+        old_report = deepcopy(self.published(report))
+        # Drafts still hold, but acceptance publishes independently of reports.
         self.bank.events.clear()
         self.doc("a", "draft", "R1 v2")
         output = self.ship()
         self.assertIn("HELD", output)
         self.doc("a", "accepted", "R1 v2")
-        self.assertIn("published build report assesses", self.ship())
-        self.assertEqual(self.bank.events, [])
-        # The rebuilt report pins the new revision; it withdraws, then specs, then itself.
+        self.ship()
+        self.assertEqual(self.bank.events, [("retain", spec)])
+        self.assertEqual(self.published(report), old_report)
+        self.assertIn(report, self.bank.docs)
+        retained_spec = next(v["item"] for v in reversed(list(self.bank.operations.values()))
+                             if v["item"]["document_id"] == spec)
+        retained_report = next(v["item"] for v in self.bank.operations.values()
+                               if v["item"]["document_id"] == report)
+        self.assertEqual(retained_spec["metadata"]["fingerprint"], self.fingerprint("a"))
+        self.assertIn(old_report["assesses"][0]["fingerprint"], retained_report["context"])
+        self.assertNotEqual(retained_spec["metadata"]["fingerprint"], old_report["assesses"][0]["fingerprint"])
+        self.bank.events.clear()
+        # A later assessment updates the report without withdrawing anything.
         self.report("R1 partially implemented", "a")
         self.ship()
-        self.assertEqual(self.bank.events, [("withdraw", report), ("retain", spec), ("retain", report)])
+        self.assertEqual(self.bank.events, [("retain", report)])
         self.assertEqual(self.published(spec)["fingerprint"], self.fingerprint("a"))
         self.assertTrue(self.published(report)["visible"])
         self.assertEqual(self.published(report)["assesses"][0]["fingerprint"], self.fingerprint("a"))
 
-    def test_interrupted_set_under_claims_then_resumes(self):
+    def test_failed_intent_retain_does_not_hold_a_verified_report(self):
         spec = self.doc("a", "accepted", "R1 v1")
         report = self.report("R1 implemented", "a")
         self.ship()
@@ -501,23 +594,19 @@ class ShipFlowTest(unittest.TestCase):
         self.bank.fail.add(spec)
         self.bank.events.clear()
         output = self.ship(code=1)
-        # The stale report is gone, the spec kept its old revision, the new report waited.
-        self.assertEqual(self.bank.events, [("withdraw", report)])
-        self.assertNotIn(report, self.bank.docs)
-        self.assertIn("HELD", output)
-        sets = self.store.list_records("set")
-        self.assertEqual([s["state"] for s in sets if s["withdraw"]], ["incomplete"])
-        self.assertFalse(self.published(report)["visible"])
-        # Meanwhile, a further spec edit cannot slip through the withdrawn report's gate.
+        # Git establishes the assessed revision even if its own retain fails.
+        self.assertEqual(self.bank.events, [("retain", report)])
+        self.assertIn(report, self.bank.docs)
+        self.assertTrue(self.published(report)["visible"])
         self.bank.fail.clear()
         self.bank.events.clear()
         self.ship()
         # The same planned revision resumes by retrying its original operation.
-        self.assertEqual(self.bank.events, [("retry", spec), ("retain", spec), ("retain", report)])
+        self.assertEqual(self.bank.events, [("retry", spec), ("retain", spec)])
         self.assertTrue(self.published(report)["visible"])
-        self.assertTrue(all(s["state"] == "published" for s in self.store.list_records("set")))
+        self.assertEqual(self.store.list_records("set"), [])
 
-    def test_withdrawn_report_keeps_governing_after_an_interruption(self):
+    def test_removed_report_does_not_hold_a_later_intent_revision(self):
         self.doc("a", "accepted", "R1 v1")
         report = self.report("R1 implemented", "a")
         self.ship()
@@ -529,10 +618,9 @@ class ShipFlowTest(unittest.TestCase):
         self.bank.fail.clear()
         self.doc("a", "accepted", "R1 v3")
         self.bank.events.clear()
-        output = self.ship(code=1)
-        self.assertIn(report, output)
-        self.assertIn("does not hold this document's published revision", output)
-        self.assertEqual(self.bank.events, [])
+        output = self.ship()
+        self.assertEqual(self.bank.events, [("retain", spec)])
+        self.assertIn(report, self.bank.docs)
 
     def test_failed_planned_publication_is_not_replayed_after_the_plan_changes(self):
         spec = self.doc("a", "accepted", "R1 v1")
@@ -553,7 +641,7 @@ class ShipFlowTest(unittest.TestCase):
         self.assertIn("ABANDONED", output)
         self.assertNotIn("payload", self.store.get("document", spec)["abandoned_attempt"])
         self.assertEqual(self.published(spec)["fingerprint"], self.fingerprint("a"))
-        # The bank copy is repaired to the published revision and its report returns.
+        # The bank copy is repaired independently of the historical report.
         self.assertEqual(self.bank.events, [("retain", spec), ("retain", report)])
 
     def test_failed_first_publication_retries_and_claims_namespace_only_on_success(self):
@@ -586,15 +674,15 @@ class ShipFlowTest(unittest.TestCase):
         self.files["docs/omg.md"] = old_report
         self.bank.events.clear()
         output = self.ship(code=1)
-        self.assertEqual(self.bank.events, [])
+        self.assertEqual(self.bank.events, [("retain", report)])
         self.assertEqual(self.store.get("document", spec)["attempt"]["state"], "failed")
-        self.assertIn("withdrawn from the bank and held", output)
         self.assertIn("does not hold this document's published revision", output)
         # Restoring the published content repairs the bank and returns the report.
         self.files["docs/a.md"] = published_spec
+        self.bank.events.clear()
         output = self.ship()
         self.assertIn("ABANDONED", output)
-        self.assertEqual(self.bank.events, [("retain", spec), ("retain", report)])
+        self.assertEqual(self.bank.events, [("retain", spec)])
 
     def test_abandoning_a_failure_that_never_reached_the_bank_leaves_health_resolved(self):
         spec = self.doc("a", "accepted", "R1 v1")
@@ -624,21 +712,22 @@ class ShipFlowTest(unittest.TestCase):
         self.assertEqual(self.bank.events, [("retain", spec)])
         self.assertEqual(self.published(spec)["fingerprint"], self.fingerprint("a"))
 
-    def test_a_pin_dropped_in_an_earlier_scan_still_governs(self):
+    def test_a_former_report_pin_never_governs_new_intent(self):
         spec = self.doc("a", "accepted", "R1 v1")
         self.doc("b", "accepted", "R2 v1")
         report = self.report("R1 and R2 implemented", "a", "b")
         self.ship()
         self.report("R2 implemented", "b")  # a correction that drops spec a
         self.ship()
-        self.assertEqual(self.published(report)["governs"], ["alpha.spec.a.0001", "alpha.spec.b.0001"])
+        self.assertNotIn("governs", self.published(report))
         self.doc("a", "accepted", "R1 v2")
         self.bank.events.clear()
-        self.assertIn("published build report assesses", self.ship())
-        self.assertEqual(self.bank.events, [])
+        self.ship()
+        self.assertEqual(self.bank.events, [("retain", spec)])
+        self.bank.events.clear()
         self.report("R1 partial, R2 implemented", "a", "b")
         self.ship()
-        self.assertEqual(self.bank.events, [("withdraw", report), ("retain", spec), ("retain", report)])
+        self.assertEqual(self.bank.events, [("retain", report)])
 
     def test_dry_run_previews_without_writes(self):
         self.doc("a", "accepted", "R1")
@@ -647,6 +736,40 @@ class ShipFlowTest(unittest.TestCase):
         self.assertIn("WOULD SHIP", output)
         self.assertEqual(self.store.puts, [])
         self.assertEqual(self.bank.events, [])
+
+    def test_unknown_report_revision_is_refused_without_blocking_accepted_intent(self):
+        spec = self.doc("a", "accepted", "R1 v1")
+        report = self.report("Unsupported assessment", "a")
+        self.files["docs/omg.md"] = self.files["docs/omg.md"].replace(self.fingerprint("a"), "f" * 64)
+        self.assertIn("not a valid current or historical document", self.ship(code=1))
+        self.assertEqual(self.bank.events, [("retain", spec)])
+        self.assertNotIn(report, self.bank.docs)
+
+    def test_unchanged_documents_do_not_retain_after_unrelated_branch_push(self):
+        self.doc("a", "accepted", "R1 v1")
+        self.report("R1 partial", "a")
+        self.ship()
+        self.bank.events.clear()
+        self.commit = "d" * 40
+        self.ship()
+        self.assertEqual(self.bank.events, [])
+
+    def test_prepared_legacy_withdrawal_is_not_replayed_and_report_is_restored(self):
+        self.doc("a", "accepted", "R1 v1")
+        report = self.report("R1 partially implemented", "a")
+        self.ship()
+        state = self.store.get("document", report)
+        state["publication"].update(visible=False, governs=["alpha.spec.a.0001"])
+        state["withdrawal"] = dict(state="prepared", set="legacy-set")
+        self.store.put("document", report, state)
+        self.bank.docs.pop(report)
+        self.doc("a", "accepted", "R1 v2")
+        self.bank.events.clear()
+        self.ship()
+        self.assertEqual(self.bank.events, [("retain", "alpha.spec.a.0001"), ("retain", report)])
+        self.assertTrue(self.published(report)["visible"])
+        self.assertNotIn("governs", self.published(report))
+        self.assertNotIn("withdrawal", self.store.get("document", report))
 
     def test_staged_record_advances_only_after_confirmed_retain(self):
         spec = self.doc("a", "draft", "R1")
@@ -751,6 +874,114 @@ class CheckCommandTest(unittest.TestCase):
         (self.repo / "docs/sub/b.md").unlink()
         (self.repo / ".hindsight-namespace").write_text("other\n")
         self.assertIn("must start with this repository's namespace", self.check(code=1).stderr)
+
+    def write_report(self, document_id, fingerprint):
+        report = SchemaLifecycleTest.BASE.replace("id: alpha.spec.a.0001", "id: alpha.build-report.one")
+        report = report.replace("type: spec", "type: build-report").replace(
+            "scope: platform", f"scope: platform\noutcome: partial\nassesses:\n"
+            f"  - id: {document_id}\n    fingerprint: '{fingerprint}'\ncode:\n"
+            f"  - repo: rig\n    commit: '{'1' * 40}'")
+        (self.repo / "docs/report.md").write_text(report)
+
+    def test_historical_report_survives_updated_moved_and_deleted_spec(self):
+        old_fp = self.check("--fingerprint").stdout.split()[0]
+        self.git("add", "-A")
+        self.git("commit", "-qm", "original spec")
+        self.write_report("alpha.spec.a.0001", old_fp)
+        path = self.repo / "docs/a.md"
+        path.write_text(path.read_text().replace("Body", "Changed requirements"))
+        self.git("add", "-A")
+        self.git("commit", "-qm", "new scope and historical partial report")
+        self.assertNotIn("WARN", self.check().stderr)
+        moved = self.repo / "docs/spec moved\nwith newline.MD"
+        path.rename(moved)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "move spec")
+        moved.unlink()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "remove current copy")
+        self.check("--rev", "HEAD")
+        self.check("docs/report.md")
+        self.write_report("alpha.spec.a.0001", "f" * 64)
+        self.assertIn("not a valid current or historical document", self.check(code=1).stderr)
+
+    def test_private_branch_revision_and_historical_discussion_are_not_valid_pins(self):
+        self.git("add", "-A")
+        self.git("commit", "-qm", "original")
+        self.git("branch", "baseline")
+        self.git("checkout", "-qb", "private")
+        path = self.repo / "docs/a.md"
+        path.write_text(path.read_text().replace("Body", "Private requirements"))
+        private_fp = self.check("--fingerprint").stdout.split()[0]
+        self.git("add", "-A")
+        self.git("commit", "-qm", "private spec")
+        self.git("checkout", "baseline")
+        self.write_report("alpha.spec.a.0001", private_fp)
+        self.assertIn("not a valid current or historical document", self.check(code=1).stderr)
+        self.git("merge", "--no-ff", "-s", "ours", "-m", "publish ancestry", "private")
+        self.check()  # The side-parent revision now belongs to selected ancestry.
+        # Discussion history is real, but cannot establish assessed requirements.
+        path.write_text(path.read_text().replace("type: spec", "type: discussion")
+                        .replace("status: draft  # note\n", ""))
+        (self.repo / "docs/report.md").unlink()
+        discussion_fp = self.check("--fingerprint").stdout.split()[0]
+        self.git("add", "-A")
+        self.git("commit", "-qm", "discussion")
+        path.unlink()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "no current discussion")
+        self.write_report("alpha.spec.a.0001", discussion_fp)
+        self.assertIn("discussion", self.check(code=1).stderr)
+
+    def test_old_required_fields_and_malformed_out_of_root_history(self):
+        notes = self.repo / "notes"
+        notes.mkdir()
+        legacy = SchemaLifecycleTest.BASE.replace("alpha.spec.a.0001", "alpha.spec.legacy.0001")
+        legacy = legacy.replace("title: A\n", "").replace("source: agent\n", "")
+        (notes / "legacy.md").write_text(legacy)
+        (notes / "broken.md").write_text(SchemaLifecycleTest.BASE.replace("type: spec", "type: build-report")
+                                         .replace("scope: platform", "scope: platform\noutcome: [passed]"))
+        self.git("add", "-A")
+        self.git("commit", "-qm", "old and malformed historical records")
+        (notes / "legacy.md").unlink()
+        (notes / "broken.md").unlink()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "remove old files")
+        masked = legacy.replace("status: draft", "status: __hindsight_lifecycle_mask__")
+        masked = masked.replace("updated_at: 2026-08-20T00:00:00Z", "updated_at: __hindsight_lifecycle_mask__")
+        self.write_report("alpha.spec.legacy.0001", hashlib.sha256(masked.encode()).hexdigest())
+        self.check()
+        self.write_report("alpha.spec.legacy.0001", "f" * 64)
+        result = self.check(code=1)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_duplicate_historical_frontmatter_and_treeish_revision_are_refused(self):
+        bad = SchemaLifecycleTest.BASE.replace("type: spec", "type: spec\nid: alpha.spec.other.0001")
+        path = self.repo / "docs/duplicate.md"
+        path.write_text(bad)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "ambiguous historical identity")
+        path.unlink()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "remove ambiguous document")
+        self.write_report("alpha.spec.a.0001", hashlib.sha256(bad.encode()).hexdigest())
+        self.check(code=1)
+        result = self.check("--rev", "HEAD^{tree}", code=2)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_shallow_history_reports_missing_ancestors(self):
+        old_fp = self.check("--fingerprint").stdout.split()[0]
+        self.git("add", "-A")
+        self.git("commit", "-qm", "assessed revision")
+        path = self.repo / "docs/a.md"
+        path.write_text(path.read_text().replace("Body", "New scope"))
+        self.write_report("alpha.spec.a.0001", old_fp)
+        self.git("add", "-A")
+        self.git("commit", "-qm", "new scope")
+        shallow = self.repo / "shallow-clone"
+        self.git("clone", "--depth=1", self.repo.as_uri(), str(shallow))
+        self.repo = shallow
+        self.assertIn("shallow Git history", self.check(code=1).stderr)
 
 
 if __name__ == "__main__":

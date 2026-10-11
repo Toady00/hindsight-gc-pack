@@ -19,7 +19,7 @@ is used. Explicit endpoints never borrow another endpoint's config credentials.
 
 `example.bank-template.json` is the working starting point: the bank
 missions and dispositions, the eleven retain strategies the default
-`docs` schema emits, the six directives protecting the bank's core
+`docs` schema emits, the directives protecting the bank's core
 distinctions, and the four mental models the pack itself references
 (`conventions-and-standards` and `landmines` feed the nightly audit;
 the service map and open-risks models are the coordinator briefs in
@@ -53,7 +53,8 @@ extraction and apply forward-only (see "Two properties worth knowing").
 | `commands/read/`, `commands/maintain/`, `commands/retain/`, `commands/status/` | `gc hindsight read`, `gc hindsight maintain`, `gc hindsight retain`, `gc hindsight status`: reads, guarded maintenance and bank-native retention, and shared Beads health |
 | `commands/check/` | `gc hindsight check`: read-only local validation of one repository's documents (schema, namespace, ID uniqueness, report pins, `--fingerprint`). The shipper runs the same checks; hook/CI wiring is optional and yours |
 | `commands/lint/` | Optional `gc hindsight lint`: semantic checks on explicit local documents using TypeSafe Jev; `--dry-run` previews requests without API access |
-| `assets/scripts/publication.py` | Publication lifecycle policy: namespaces, per-document gates, build-report sets. Pure functions; no I/O |
+| `assets/scripts/publication.py` | Publication lifecycle policy: namespaces and independent per-document eligibility. Pure functions; no I/O |
+| `assets/scripts/revision_history.py` | Historical assessment references from selected Git ancestry, with batched blob reads and targeted fingerprint verification |
 | `assets/scripts/ship-docs.sh` | Git-only docs shipping from freshly fetched origin branches, gated by `publication.py`. Shared Beads receipts track intent, recovery and confirmed completion; bank hashes alone never prove success. Validation, drain-before-ship, operation polling and GONE reports |
 | `assets/scripts/bank-maintain.sh` | Deterministic maintenance: drain, consolidate (recover+retry), tag audit incl. Levenshtein near-duplicate detection. Exit codes drive the formula |
 | `assets/scripts/memory-retain.sh` | The write path for **bank-native agent memories** (gotchas): contract payload, pending-op serialization, `--bump` for repeat reports (hit_count + timestamp refresh) |
@@ -105,9 +106,13 @@ managed session; exit 0 means queued, not shipped. Follow the formula bead for
 completion. `gc hindsight ship --dry-run` previews locally without retaining or
 updating health, but still fetches Git and reads the bank and city Beads store.
 The first word after `gc` is your import binding name.
-Revise by editing in place; retire with `status: deprecated` — never
-delete. Status is per document, and after a document is first accepted only
-accepted revisions publish; see "The shipping contract". `gc hindsight check`
+Revise by editing in place; preserve discussion history, and retire other document
+types with `status: deprecated` rather than deleting them. Discussions omit status
+and ship without acceptance. They preserve dated reasoning and deferred ideas;
+later scope decisions do not supersede or deprecate the conversation. Hindsight
+handles temporal context, while approved intent defines what to build. Status is
+per non-discussion document, and after first acceptance new drafts do not publish;
+see "The shipping contract". `gc hindsight check`
 validates a repository's documents locally, read-only.
 
 **Operator - survey a rig:**
@@ -196,14 +201,19 @@ working directory. Full documents are preserved, with context limits enforced by
 the selected model's API rather than a local byte cutoff.
 
 See [lint usage and evaluation](commands/lint/help.md) and the
-[draft proposals](docs/discussion.memory.semantic-checks.0001.md) for frontmatter
+[discussion proposals](docs/discussion.memory.semantic-checks.0001.md) for frontmatter
 assistance, proposal intake, and candidate selection experiments.
 
 ## The shipping contract
 
 Git holds every revision. The bank is the city-wide record of the relevant
 **published** revision of each document: the last revision that was eligible to
-publish. Status belongs to each document (`draft | accepted | superseded |
+publish. Discussions have no status and ship independently of acceptance or
+report pins. Preserve dated reasoning and deferred ideas; later decisions do not
+retire the conversation. Migrate by removing its status while preserving ID,
+provenance and history. Remove legacy discussion pins from reports and republish
+those reports; until repaired they are refused and scans stay incomplete.
+Status belongs to each other document (`draft | accepted | superseded |
 deprecated`), never to an initiative or a set. The shipper enforces these rules
 on every scan, validating the whole manifest before any write:
 
@@ -214,22 +224,22 @@ on every scan, validating the whole manifest before any write:
    accepted (seen in a publication record or anywhere in its published Git
    history), reverting it to draft and later draft edits do not publish: the
    bank keeps the last eligible revision and the scan reports HELD. Accepting a
-   revision makes it eligible again, subject to rule 3.
-3. **Build-report gate.** Once a published build report pins a document, a new
-   content revision of it is eligible only in the same scan as an updated report
-   that pins that exact revision; they publish in the ordered sequence below,
-   which is not atomic. Acceptance alone never unlocks it, and neither
-   does retiring the report or dropping the pin: every published report that
-   ever pinned a document keeps governing it. A report may publish alone when
-   it pins revisions the bank already holds, which corrects a false assessment
-   without another build. New, never-accepted documents
-   still publish as drafts without touching the assessed baseline.
+   revision makes it eligible again independently of build reports.
+3. **Historical build assessments.** Intent and reports publish independently.
+   Reports identify what was assessed by document ID/fingerprint and code commit.
+   A partial or failed assessment of revision A remains valid when accepted
+   revision B publishes. B is unassessed until explicitly assessed; never update
+   report pins merely to match new scope. References must resolve to a valid
+   current or historical document in the selected Git commit's ancestry, not
+   necessarily the latest files or bank-visible content. Unknown fingerprints
+   refuse the report without holding valid intent. Nothing withdraws reports
+   because scope changes.
 4. **Retire and restore against published content.** `superseded`,
    `deprecated`, and restoring `accepted` publish immediately, but only when
    everything except `status` and `updated_at` matches the last *published*
    content exactly, `source` and `id` included. Retired documents are frozen.
    To repair, revert to the published content, restore `accepted`, then edit as
-   a draft through reapproval and the build gate. Mismatches are REFUSED, never
+   a draft through reapproval. Mismatches are REFUSED, never
    applied to different bytes. Nothing is deleted; a file that vanishes gets a
    GONE report, never a removal.
 5. **Identity.** IDs are `<namespace>.<document-id>`, unique across the bank and
@@ -257,49 +267,41 @@ lines, and any parse that does not match the masked text are refused, so the
 exemption can never widen to other fields or the body. `gc hindsight check
 --fingerprint` prints it. A schema without lifecycle output falls back to the
 whole-file hash, which leaves it no status-only changes.
+Discussions have no status line, so only `updated_at` is masked for them.
 
 **Build reports** (`type: build-report`) carry `outcome: passed | partial |
 failed`, `assesses` (each `{id, fingerprint}` of an initiative-owned document in
-the same namespace), and `code` (each `{repo, commit}`). Quote fingerprints and
+the same namespace, excluding discussions), and `code` (each `{repo, commit}`). Quote fingerprints and
 SHAs: YAML reads an all-digit SHA as a number. A report is implementation
 evidence. Its publication is not human approval, not proof that every target
 requirement shipped, and not deployment. External references to other
-initiatives or repositories do not extend the gate; periodically retrieving the
+initiatives or repositories do not extend the assessment; periodically retrieving the
 *Implementation Reality and Intent Drift* mental model is how those conflicts are
 noticed.
 
-**Ordered sets, not complete-set visibility.** Hindsight v0.10.x has no
-multi-document transaction and no server-side visibility switch that every
-reader honours, so several documents cannot be revealed at once: retain is per document and streaming, tag PATCH and
-document import commit per document, per-memory invalidation applies only after
-ingestion, and bank import only creates a new bank. Consumers therefore *can*
-see a partially ingested report/document set. What the shipper guarantees is
-narrower. A report and the revisions it pins publish as an ordered set: every governing
-report that pins revisions about to change is first deleted from the bank (its
-derived observations go with it), then the documents publish, then the reports.
-After any prefix of those writes, every visible report pins only revisions the
-bank holds; an interruption leaves less evidence visible, never evidence about
-content the bank lacks. The price is the opposite exposure: while a set
-publishes (each retain is a full extraction, typically minutes) its new intent
-revisions are visible with no report, which falls short of the agreed
-hold-until-report semantics. Retrieved bank content cannot show which revision a
-report assessed. What the bank holds is recorded in the city's publication
-records: each document record's `publication` (published fingerprint, visibility,
-set, and a report's pins) and the `hindsight-publication-set` state. Git alone
-(`gc hindsight check --fingerprint` against the report file's `assesses`)
-describes the repository, which can differ from the bank. Documents of an interrupted set
-that did publish stay visible without their report until the set resumes; if the author abandons the
-change instead, republishing the previously published content (or a report
-pinning what the bank holds) restores consistency. A failed planned retain is
-retried only when the next plan selects the same revision again; otherwise the
-failed attempt is retired (ABANDONED, kept without its payload for audit) before
-the newly planned revision is submitted. A report is held whenever a pinned
-document's bank copy does not match its record. Every scan, explicit roots
-included, reads the city registry to validate namespace ownership. A `hindsight-publication-set` record names the members
-and state; a later scan resumes it. A withdrawn report's last published pins keep
-governing until a replacement publishes. Within one document, re-ingestion is
-not atomic either: retrieval can see a partly re-extracted revision while it
-re-ingests and, if the retain fails, until a later scan replaces it. Mental models are periodic syntheses and lag until refreshed.
+**Independent publication.** The bank can hold newer accepted intent alongside
+a report assessing an older revision. That is a valid temporal relationship,
+not a broken publication set. Read a report's assessed spec revision, fingerprints
+and code commits before applying its evidence to current scope. Its derivation
+context includes those exact references. Git holds the historical source;
+publication records identify which report and intent revisions the bank retained.
+The local checker searches HEAD ancestry, or `--rev` ancestry; the shipper searches
+the freshly fetched canonical branch ancestry. Historical lookup verifies recorded
+identity/type, duplicate-free frontmatter and exact fingerprints without imposing
+today's required fields on old revisions. Markdown from anywhere in that ancestry
+counts, including drafts and former docs locations; existence is not approval or
+implementation. Code SHAs are format-checked here; the producing workflow owns
+execution evidence. Other branches' private revisions
+do not count. Fetch missing history if an old reference cannot be verified.
+
+Legacy set records and `governs` fields no longer gate intent. Prepared withdrawals
+are not resumed, and eligible reports previously withdrawn are restored through
+normal publication. Each retain still requires a confirmed completion receipt.
+A failed planned retain retries only if the next plan selects the same revision;
+otherwise its attempt is retired as ABANDONED before the new revision is submitted.
+Every scan validates namespace ownership. Re-ingestion of a single document is
+streaming, not atomic: retrieval may see a partly re-extracted revision until it
+finishes or a later scan repairs a failure. Mental models can lag until refreshed.
 
 Publication is still determined by **where you push**. A private or unpushed
 branch is excluded from the default scan. An explicit `--ref` can select another
@@ -344,7 +346,7 @@ with the retain and promoted only after the receipt is confirmed, so a retain
 completed by a later scan's recovery advances exactly what was planned. A bank
 document with no publication record has no known baseline: it is refused until
 a record is established deliberately. `hindsight-namespace` and
-`hindsight-publication-set` records hold namespace claims and set progress.
+`hindsight-publication-set` records hold namespace claims and legacy set audit history.
 Before retain POST, the shipper persists a UUID operation intent and full request
 snapshot. It confirms completion before recording success. The next run recovers
 the original unresolved operation with bounded retry, even after a machine
@@ -565,7 +567,7 @@ Retrieval scoping is unaffected by residency: agent memories carry full
 
 ## Deleting from the bank (manual, break-glass)
 
-The pack never deletes — retire-in-place (`status: deprecated`) is the
+The pack never deletes. Preserve discussion history; retire-in-place (`status: deprecated`) is the
 in-band mechanism, and the archivist's hard rules forbid destructive
 ops. But a human removing pure noise (a premature doc, a pivoted
 direction) is legitimate. The procedure differs by kind:
@@ -583,8 +585,8 @@ direction) is legitimate. The procedure differs by kind:
   half-done" reminder, by design — report-only, never auto-removed.
 
 Deletion erases the bank's copy only; anything else that referenced the
-doc id in body text keeps its dangling reference. Prefer deprecation
-whenever the history has value.
+doc id in body text keeps its dangling reference. Preserve discussions whenever
+their history has value; prefer deprecation for other document types.
 
 ---
 
@@ -633,7 +635,8 @@ the `hindsight-memory` skill.
 `scope:` · `repo:` · `domain:` · `memory_type:` · `source:` · `status:`
 
 Every one is known from frontmatter before retain, so every one is a
-deterministic tag. None are LLM-generated, and none require registration —
+deterministic tag when applicable. Discussion records omit the status axis.
+None are LLM-generated, and none require registration —
 adding a new repo or domain costs nothing.
 
 **There are no `entity_labels`, deliberately.** An entity label is a *per-fact*

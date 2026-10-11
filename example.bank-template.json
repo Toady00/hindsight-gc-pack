@@ -25,14 +25,14 @@
         "retain_mission": "Extract the observed state of a system as it exists today: services, components, and their responsibilities; interfaces, endpoints, schemas, and data stores actually in use; dependencies, runtimes, and versions; deployment and infrastructure topology; and known deviations from platform conventions. Record each fact as OBSERVED, not as decided or intended. Where the rationale for something is unknown, record the fact and state that the reason is undocumented — never infer or invent a rationale. Explicitly capture anything that appears accidental, inconsistent, or contrary to a stated platform convention, along with any evidence of why it is that way. Preserve exact names, versions, endpoints, paths, schema and field names, and configuration values."
       },
       "discussion": {
-        "retain_mission": "Extract what was DECIDED separately from what was PROPOSED. A position someone advocated is not a decision — record it as a position, attributed to who raised it. Capture commitments with their owners, action items, objections raised, and questions left unresolved. Note explicitly when a thread ended without resolution. Ignore scheduling, pleasantries, and restatements of documents that already exist in the bank."
+        "retain_mission": "Extract what was DECIDED separately from what was PROPOSED. A position someone advocated is not a decision, record it as a position attributed to who raised it. Capture commitments with their owners, action items, objections raised, and questions left unresolved. Note explicitly when a thread ended without resolution. Preserve dates, context, reasoning and deferred ideas even when later initiative scope excludes them. A discussion records a conversation that happened, has no status and does not establish approved scope or implementation. Ignore scheduling, pleasantries, and restatements of documents that already exist in the bank."
       },
       "voice-memo": {
         "retain_mission": "Extract the durable substance of an owner voice memo: ideas worth preserving, concerns, problems encountered, decisions under consideration, and priorities. Record these as the owner's current thinking, never as settled platform decisions. Preserve specifics — names, numbers, error text, tool names — even when the surrounding phrasing is rough. Ignore filler, false starts, self-corrections, and transcription artifacts; where a sentence is garbled but the intent is clear, extract the intent."
       },
       "build-report": {
         "retain_extraction_mode": "concise",
-        "retain_mission": "Extract what was actually built: the components, interfaces, and behavior that shipped; each deviation from what the specification required and the reason for it; constraints discovered during implementation; and follow-up work left open. Ignore task-by-task progress narration, tool output, and restatement of the specification."
+        "retain_mission": "Extract what was implemented and verified at the assessed code revision, including partial or failed outcomes, deviations, evidence limits and remaining work. Preserve the assessed document fingerprints, spec baseline and code commits. An assessment of older intent remains valid when newer accepted scope exists; do not transfer implementation evidence to unassessed revisions. Ignore task-by-task progress narration, tool output, and restatement of the specification."
       },
       "operational-runbook": {
         "retain_extraction_mode": "verbatim",
@@ -50,6 +50,14 @@
     }
   },
   "directives": [
+    {
+      "name": "Respect assessment baselines",
+      "content": "Build reports assess exact document revisions and code commits, which may be historical. A partial or failed report assessing revision A remains valid when accepted revision B publishes. Distinguish current accepted intent from the latest implementation assessment; B is unassessed until a report explicitly assesses it. Do not invalidate A's evidence because scope changed or apply it to B without supporting assessment."
+    },
+    {
+      "name": "Preserve discussion history",
+      "content": "Discussions are status-free records of conversations that happened. Later decisions may change current direction, but do not accept, supersede or deprecate the conversation record. Preserve its date, attribution, reasoning and deferred ideas. A narrower initiative excludes work from that initiative, not from future consideration; do not infer rejection of ideas it does not address. Use temporal context to distinguish what was discussed then from what authoritative documents approve now."
+    },
     {
       "name": "Decisions outrank thinking",
       "content": "When sources conflict, prefer what a specification, ADR, PRD, methodology, or convention establishes as decided over a position raised in a discussion or an owner voice memo. A voice memo captures the owner's current thinking and a discussion may capture positions nobody adopted; neither is a settled decision. Attribute unsettled positions as such, with who raised them. When a decision is marked superseded or deprecated, answer with what replaced it and name what it replaced. Do not treat an explicit supersession as an unresolved contradiction."

@@ -12,13 +12,14 @@
 #       (optional "content" overrides the core's default of
 #        frontmatter-stripped body; optional "lifecycle" carries
 #        {status, type, fingerprint} and, for build reports,
-#        {outcome, assesses, code} for the core's publication gates)
+#        {outcome, assesses, code} for historical assessment references)
 #   stderr: warn-level findings (shipped anyway), one per line
 #   env (provided by the core when available):
 #     HINDSIGHT_KNOWN_REPOS         newline-separated rig names
 #     HINDSIGHT_KNOWN_DOMAINS_FILE  known-domains file, one per line
 #
-# Type selects extraction strategy. Status is required for every document.
+# Type selects extraction strategy. Non-discussion documents require status;
+# discussions omit both status and status tags.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FILE="$(mktemp)"; trap 'rm -f "$FILE"' EXIT

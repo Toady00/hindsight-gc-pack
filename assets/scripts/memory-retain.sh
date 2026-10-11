@@ -42,7 +42,7 @@ PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$PACK_DIR/assets/scripts/common.sh"
 API=""
 BANK="" ID="" TYPE="" TITLE="" REPOS="" DOMAINS="" SCOPE="" SOURCE="" STATUS=""
-BUMP=false CONTENT_FILE="" DRY_RUN=false DRAIN_TIMEOUT=300
+BUMP=false CONTENT_FILE="" DRY_RUN=false DRAIN_TIMEOUT=300 STATUS_SET=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,7 +53,7 @@ while [[ $# -gt 0 ]]; do
     --domains) DOMAINS="$2"; shift 2 ;;
     --scope) SCOPE="$2"; shift 2 ;;
     --source) SOURCE="$2"; shift 2 ;;
-    --status) STATUS="$2"; shift 2 ;;
+    --status) STATUS="$2"; STATUS_SET=true; shift 2 ;;
     --bump) BUMP=true; shift ;;
     --content-file) CONTENT_FILE="$2"; shift 2 ;;
     --bank) BANK="$2"; shift 2 ;;
@@ -110,13 +110,19 @@ if $BUMP; then
   [[ -n "$SCOPE" ]] || SCOPE="$(jq -r '[.[] | select(startswith("scope:")) | sub("^scope:";"")] | first // "'"$SCOPE"'"' <<<"$tags_json")"
   [[ -n "$SOURCE" ]] || SOURCE="$(jq -r '[.[] | select(startswith("source:")) | sub("^source:";"")] | first // "'"$SOURCE"'"' <<<"$tags_json")"
   [[ -n "$TYPE" ]] || TYPE="$(jq -r '[.[] | select(startswith("memory_type:")) | sub("^memory_type:";"")] | first // "'"$TYPE"'"' <<<"$tags_json")"
-  [[ -n "$STATUS" ]] || STATUS="$(jq -r '[.[] | select(startswith("status:")) | sub("^status:";"")] | first // ""' <<<"$tags_json")"
-  [[ -n "$STATUS" ]] || { echo "legacy memory has no status; choose --status explicitly" >&2; exit 2; }
+  if [[ "$TYPE" != discussion ]]; then
+    [[ -n "$STATUS" ]] || STATUS="$(jq -r '[.[] | select(startswith("status:")) | sub("^status:";"")] | first // ""' <<<"$tags_json")"
+    [[ -n "$STATUS" ]] || { echo "legacy memory has no status; choose --status explicitly" >&2; exit 2; }
+  fi
 else
   TYPE="${TYPE:-gotcha}"; SCOPE="${SCOPE:-repo}"; SOURCE="${SOURCE:-agent}"; STATUS="${STATUS:-accepted}"
   [[ -n "$TITLE" ]] || { echo "--title is required for new retains" >&2; exit 2; }
   if [[ -n "$CONTENT_FILE" ]]; then CONTENT="$(cat "$CONTENT_FILE")"; else CONTENT="$(cat)"; fi
   [[ -n "$CONTENT" ]] || { echo "no content (stdin or --content-file)" >&2; exit 2; }
+fi
+if [[ "$TYPE" == discussion ]]; then
+  $STATUS_SET && { echo "discussion records must omit --status" >&2; exit 2; }
+  STATUS=""
 fi
 
 # ---------- report line: owned by this script, reader-visible ----------
@@ -129,7 +135,7 @@ CONTENT="$(printf '%s\n\nReported %s %s (last: %s).\n' "$(printf '%s' "$CONTENT"
 repos_json="$(jq -cRn --arg s "$REPOS" '$s | split(",") | map(select(length>0))')"
 domains_json="$(jq -cRn --arg s "$DOMAINS" '$s | split(",") | map(select(length>0))')"
 verdict="$(jq -cn --arg id "$ID" --arg title "$TITLE" --arg type "$TYPE" --arg scope "$SCOPE" --arg source "$SOURCE" --arg status "$STATUS" --arg updated_at "$NOW" --argjson repos "$repos_json" --argjson domains "$domains_json" \
-  '{id:$id,title:$title,type:$type,scope:$scope,source:$source,status:$status,updated_at:$updated_at,repos:$repos,domains:$domains}' \
+  '{id:$id,title:$title,type:$type,scope:$scope,source:$source,updated_at:$updated_at,repos:$repos,domains:$domains} + (if $type == "discussion" then {} else {status:$status} end)' \
   | python3 "$PACK_DIR/schemas/docs/validate.py")"
 [[ "$(jq -r .verdict <<<"$verdict")" == "ship" ]] || { jq -r '.reason // "invalid memory"' <<<"$verdict" >&2; exit 2; }
 STRATEGY="$(jq -r .strategy <<<"$verdict")"

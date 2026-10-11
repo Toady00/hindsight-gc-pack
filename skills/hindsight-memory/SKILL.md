@@ -70,12 +70,14 @@ document is first accepted. After that it holds the last accepted (or
 retired) revision; a newer draft may exist only in Git. A build report is
 implementation evidence for the exact revisions it lists in `assesses`, not
 approval, deployment, or proof that every requirement shipped. Publication
-of a report and its documents is ordered, not atomic: an intent document can be
-newer than any report pinning it while the set publishes and, after an interruption, until a later scan completes it. Retrieved content cannot show which
-revision a report assessed. The city's publication records do: each document
-record's `publication` holds the published fingerprint and a report's pins, and
-`hindsight-publication-set` records show whether a set is still publishing.
-Comparing Git fingerprints with the report file describes Git, not the bank. Read the tags:
+of intent and reports is independent. A report may legitimately assess historical
+intent while the bank holds newer accepted scope. Compare its `assesses` fingerprints
+with the intent's retained fingerprint/context and read its `code` commits. The
+report body may also name the assessed spec commit. Newer scope is unassessed until explicitly
+assessed. Preserve a partial or failed report's evidence rather than calling it
+invalid or advancing its pins. The city's publication records identify the exact
+report revision retained; Git provides the historical source documents.
+Comparing current Git files alone cannot establish what was assessed. Read the tags:
 
 | Pair | Means |
 |---|---|
@@ -84,9 +86,10 @@ Comparing Git fingerprints with the report file describes Git, not the bank. Rea
 | `status:accepted` + `source:human` | ratified by a person |
 | `status:accepted` + `source:agent` | standing position from a trusted workflow, never human-reviewed |
 | `status:superseded` / `deprecated` | history, kept queryable on purpose |
-| no `status:` | legacy or malformed record; do not infer acceptance |
+| `memory_type:discussion` with no `status:` | dated conversation history, including deferred ideas; not approved scope |
+| other records with no `status:` | legacy or malformed record; do not infer acceptance |
 
-Every document now requires status, including surveys, voice memos, build
+Every non-discussion document requires status, including surveys, voice memos, build
 reports, and gotchas. Acceptance admits the record; its type still determines
 what it establishes. An accepted survey is an observation, and an accepted
 voice memo is thinking, never a platform decision.

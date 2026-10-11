@@ -3,7 +3,6 @@ schema_version: 2
 id: discussion.memory.semantic-checks.0001
 type: discussion
 title: Optional semantic document checks and follow-on experiments
-status: draft
 source: agent
 scope: repo
 repos: [hindsight]
@@ -12,6 +11,10 @@ created_at: 2026-09-23T00:00:00Z
 updated_at: 2026-09-23T00:00:00Z
 ---
 # Optional semantic document checks
+
+> Editorial note, 2026-10-09: Discussion records now omit status. The draft
+> language below records the earlier contract; it does not give this conversation
+> an approval or retirement lifecycle. Its proposals remain available for later work.
 
 This draft records the September 23 discussion about TypeSafe Jev experiments.
 The requested first experiment is a standalone `gc hindsight lint` command.

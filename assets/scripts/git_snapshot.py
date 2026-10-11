@@ -15,7 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 
-def _git(repo, *args):
+def _git(repo, *args, data=None):
     env = os.environ.copy()
     for name in (
         "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
@@ -27,7 +27,7 @@ def _git(repo, *args):
     try:
         result = subprocess.run(
             ["git", "-C", str(repo), *args],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, check=False, timeout=120,
+            input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, check=False, timeout=120,
         )
     except subprocess.TimeoutExpired:
         raise ValueError(f"git {args[0]} timed out") from None

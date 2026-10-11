@@ -94,6 +94,18 @@ class MemoryShellTest(ShellFixture):
     def memory(self, *args, **kwargs):
         return self.run_script(SCRIPTS / "memory-retain.sh", "--id", DOCUMENT_ID, *args, **kwargs)
 
+    def test_discussion_retain_and_bump_have_no_status(self):
+        self.memory("--type", "discussion", "--title", "Conversation", "--repos", "repo",
+                    input="2026-10-09: Discussed R1 and deferred R2.")
+        self.config["document"] = json.loads((self.root / "server.json").read_text())["documents"][0]
+        self.memory("--bump")
+        doc = self.posts()[-1]["payload"]["items"][0]
+        self.assertIn("memory_type:discussion", doc["tags"])
+        self.assertFalse(any(t.startswith("status:") for t in doc["tags"]))
+        result = self.memory("--type", "discussion", "--title", "Conversation", "--repos", "repo",
+                             "--status", "accepted", "--dry-run", input="Conversation", code=2)
+        self.assertIn("discussion records must omit --status", result.stderr)
+
     def test_completion_write_failure_recovers_before_bump_or_content_read(self):
         self.config["completion_write_error"] = True
         self.memory("--title", "Fixture", "--repos", "repo", input="Symptom, cause, fix.", code=5)

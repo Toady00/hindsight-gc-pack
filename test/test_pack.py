@@ -71,12 +71,18 @@ class SchemaTest(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def test_every_type_requires_status_and_matches_audit_vocabulary(self):
+    def test_non_discussion_types_require_status_and_match_audit_vocabulary(self):
         types = json.loads((PACK / "schemas/docs/audit-vocab.json").read_text())["closed"]["memory_type"]
         self.assertEqual(set(types), set(schema.STRATEGIES))
         for kind in types:
             with self.subTest(kind=kind):
                 fields = dict(FIELDS, type=kind, **(REPORT_FIELDS if kind == "build-report" else {}))
+                if kind == "discussion":
+                    with self.assertRaisesRegex(ValueError, "omit status"):
+                        schema.validate(fields)
+                    del fields["status"]
+                    self.assertEqual(schema.validate(fields)["strategy"], schema.STRATEGIES[kind])
+                    continue
                 self.assertEqual(schema.validate(fields)["strategy"], schema.STRATEGIES[kind])
                 del fields["status"]
                 with self.assertRaisesRegex(ValueError, "status"):
@@ -105,6 +111,9 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(item["content"], DOC.split("---\n")[-1])
         self.assertEqual(digest, hashlib.sha256(DOC.encode()).hexdigest())
         self.assertEqual(item["metadata"]["content_hash"], digest)
+        self.assertEqual(item["metadata"]["fingerprint"], digest)
+        self.assertIn(digest, item["context"])
+        self.assertEqual(item["metadata"]["source_commit"], DOCUMENT["commit"])
         self.assertEqual(source["kind"], "git")
         changed = dict(DOCUMENT, content=DOC.replace("status: draft", "status: accepted"))
         self.assertNotEqual(ship_docs.item_from(changed, verdict)[1], digest)
@@ -351,7 +360,7 @@ class ShipCLITest(unittest.TestCase):
                 report = self.ship("--reprocess")
                 self.assertEqual(report["counts"]["recovered"], 1)
                 self.assertEqual([c[0] for c in events.mock_calls], ["api.drain", "ingestor.recover",
-                                 "ingestor.recover_withdrawal", "api.inventory", "ingestor.abandon_failed",
+                     "api.inventory", "ingestor.abandon_failed",
                                  "ingestor.retain"])
                 self.assertEqual(self.ingestor.retain.call_args.kwargs["force"], not reprocess)
 

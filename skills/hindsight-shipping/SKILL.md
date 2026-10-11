@@ -1,13 +1,14 @@
 ---
 name: hindsight-shipping
-description: Getting documents into the platform memory bank — frontmatter contract, document IDs and namespaces, the per-document publication lifecycle and build-report gate, the ship path, approval recording, and agent-contributed memory via archivist proposals
+description: Getting documents into the platform memory bank — frontmatter contract, document IDs and namespaces, independent document publication and historical build assessments, the ship path, approval recording, and agent-contributed memory via archivist proposals
 ---
 
 # Shipping documents to the memory bank
 
 The bank holds the last *eligible* published revision of each document;
 Git holds every revision. Drafts publish freely until a document is first
-accepted; after that, see "Publication lifecycle" below. You get content
+accepted; after that, see "Publication lifecycle" below. Status-free discussion
+records publish independently of acceptance and report pins. You get content
 into the bank by writing a doc and committing it — not by calling the
 Hindsight API. The archivist's
 scheduled sync (`gc hindsight ship`) is the single ship path. The supported
@@ -40,11 +41,21 @@ updated_at: 2026-08-20T15:30:00Z    # revision timestamp; the full-file hash dri
 Types: `adr` `spec` `hld` `prd` `user-journey` `methodology` `convention`
 `current-state` `meeting-notes` `discussion` `voice-memo` `build-report`
 `runbook` `gotcha` `external`. Anything else is refused at ship time.
-Every type requires `status`, including current-state, build-report, gotcha,
+Every type except `discussion` requires `status`, including current-state, build-report, gotcha,
 voice-memo, and external. Status never selects extraction strategy; `type` does.
 Acceptance admits a record without changing its kind of evidence: a survey
 remains an observation and a voice memo remains thinking. Missing status is
-refused. Legacy bank-native memories need an explicit `--status` on first bump.
+refused for those types. Discussions must omit the field entirely, including null
+or synthetic values, and produce no status tag. Legacy bank-native memories of
+other types need an explicit `--status` on first bump.
+
+Discussions record what was explored, considered or said at a stated time. Preserve
+dated reasoning and ideas deferred when scope narrows; append later decisions
+rather than rewriting the earlier conversation to match them. Editorial corrections
+may fix the account. Keep date, context and relevant document links. Hindsight handles
+temporal relationships. Discussion evidence establishes what was discussed, not
+approved scope, current direction or implementation. Acceptance, supersession and
+deprecation do not apply, and build reports cannot pin discussions.
 
 Rules that bite:
 
@@ -55,7 +66,7 @@ Rules that bite:
   not a revision number: revise in place, never mint `.0002` for an edit.
   IDs are unique across the bank, retired documents included; never reuse
   one for a different document or type.
-- **One status vocabulary for every doc type.** Not "final", not
+- **One status vocabulary for non-discussion types.** Not "final", not
   "approved", not "proposed" — `draft | accepted | superseded | deprecated`.
 - **`source` is human-in-the-loop for this revision**, not authorship
   history. You (an agent) write `source: agent`. It becomes `human` only
@@ -66,7 +77,7 @@ Rules that bite:
   **`domains` are bounded contexts** — never path-taxonomy values like
   `platform` (that's a scope). Copy existing spellings; never mint
   variants.
-- **Docs are never deleted** — mark `deprecated` (or `superseded`) and
+- **Docs are never deleted** — preserve discussion history; for other types mark `deprecated` (or `superseded`) and
   let the sync re-ship them. Change *only* `status` (and `updated_at`)
   when you do: retirement applies to the last published content. Cross-reference related doc ids in the body
   (frontmatter is stripped at ship; body text is what survives into
@@ -74,21 +85,27 @@ Rules that bite:
 
 ## Publication lifecycle
 
-Status belongs to each document. Approval of intent never proves
+Status belongs to each non-discussion document. Approval of intent never proves
 implementation; only a build report is implementation evidence.
+
+Discussions ship without acceptance and never become accepted or retired.
+To migrate an existing discussion, remove only its `status` field and retain its
+stable ID, provenance and history. Its next publication replaces legacy status
+tags and lifecycle metadata; earlier acceptance or retirement does not hold it.
+Remove any legacy discussion entries from a build report's `assesses` and
+republish the report. Until repaired, that report is refused and scans are incomplete.
 
 - **Before first acceptance** every pushed draft revision publishes.
 - **After first acceptance** (published, or anywhere in the document's
   published Git history), draft revisions — including a plain revert to
   `draft` — do not publish. The bank keeps the last eligible revision and the
   scan reports HELD. Edit freely in Git; accept a revision to publish it.
-- **Build-report gate.** Once a published build report pins a document, new
-  content for it is eligible only in the same scan as an updated report pinning
-  that exact revision. They publish in order (stale report withdrawn, documents,
-  then report), not atomically: readers can see the new revision with no
-  report while the set publishes and, after an interruption, until a later scan completes it. Reacceptance alone does not unlock it. Unchanged documents
-  need no new revision. A new, never-accepted proposal document publishes
-  normally and does not disturb the assessed baseline.
+- **Independent assessments.** Accepted intent publishes without waiting for a
+  report. A report remains valid for the exact document revisions and code it
+  assessed, including partial or failed work, even when newer scope publishes.
+  New scope is unassessed until a report explicitly assesses it. Never advance
+  report pins just to match the latest files. Nothing withdraws an old report
+  merely because intent changes.
 - **Retire or restore** (`superseded`, `deprecated`, back to `accepted`) only
   against the last *published* content: everything except `status` and
   `updated_at`, including `source` and `id`, must match exactly, or the scan
@@ -99,7 +116,8 @@ The **fingerprint** identifies a revision for these rules: the file with only
 the `status` and `updated_at` values masked (`gc hindsight check
 --fingerprint <path>`). Keep each of those fields as one plain top-level
 `key: value` line; duplicates or multi-line forms are refused. Note that
-changing `source` changes the fingerprint.
+changing `source` changes the fingerprint. A discussion has no status line, so
+only its `updated_at` value is masked.
 
 **Build reports** add three frontmatter fields:
 
@@ -115,16 +133,24 @@ code:                         # resulting code state per assessed repository
 ```
 
 Quote fingerprints and SHAs (YAML reads an all-digit SHA as a number). Pin
-only the initiative's own documents; references elsewhere are body text and
-do not extend the gate. Only build reports may carry `outcome`, `assesses`
+only the initiative's own non-discussion documents; references elsewhere are body text and
+do not extend the assessment. Only build reports may carry `outcome`, `assesses`
 or `code`. Keep reports `status: draft`, `source: agent`: a human-accepted
 report is subject to rule 2 like any document, so its later agent drafts are
-held, and with them every document it pins. Retiring a report, dropping a
-pin, or deleting the report file never releases a pinned document; restore
-the report and publish an update pinning the new revision instead. A report's body states requirement-level outcomes and
+held; intent publication remains independent. A report's body states requirement-level outcomes and
 gaps. Its publication is not approval, deployment, or proof that every target
 requirement shipped. Correcting a false assessment needs no new build: pin the
-revisions already published.
+revisions actually assessed. References must resolve to a document's recorded
+ID/type and exact fingerprint in current files or Git history reachable from the
+selected commit. Moved or historical documents are valid; invented fingerprints
+and other branches' private revisions are refused. Use `check --rev <assessed-sha>
+--fingerprint <path>` to recover the exact assessed fingerprint. Shipping verifies
+against the fetched canonical branch history, not a private checkout.
+Historical lookup validates identity, type, duplicate-free frontmatter and exact
+bytes/fingerprint without imposing today's required fields on old revisions.
+The whole repository's Markdown history counts, including draft or moved source
+outside today's docs roots; this proves existence, not approval or implementation.
+Code SHAs are format-checked here; the producing workflow owns execution evidence.
 
 Before pushing, run `gc hindsight check` (read-only; the shipper runs the same
 checks). `gc hindsight ship --dry-run` previews HELD and REFUSED decisions

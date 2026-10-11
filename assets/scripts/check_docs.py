@@ -5,7 +5,7 @@ repository namespace, ID namespace and uniqueness (retired documents still own
 their IDs), and build-report pins. It reads the working tree, or a commit with
 --rev; it never reads the Git index, writes files, or contacts the bank.
 
-Publication history (acceptance, frozen revisions, build-report gates) lives in
+Publication history (acceptance and frozen revisions) lives in
 the city's publication records. The publisher runs these same checks, then
 enforces that history; a document passing here can still be held there.
 """
@@ -19,6 +19,7 @@ import publication
 from git_snapshot import _git
 from ship_docs import PACK, derive
 from ingestion import Error
+from revision_history import RevisionHistory
 
 GUIDANCE = f"""
 Repair: give every published document an ID of the form <namespace>.<document-id>,
@@ -69,6 +70,9 @@ def main(argv=None):
         start = Path(args.paths[0]).resolve() if args.paths else Path.cwd()
         anchor = start if start.is_dir() else start.parent
         repo = Path(_git(anchor, "rev-parse", "--show-toplevel").decode().rstrip("\n")).resolve()
+        if args.rev:
+            args.rev = _git(repo, "rev-parse", "--verify", "--end-of-options",
+                            args.rev + "^{commit}").decode("ascii").strip()
         prefixes = []
         for path in args.paths or [str(repo / "docs")]:
             relative = Path(path).resolve().relative_to(repo).as_posix()
@@ -107,7 +111,8 @@ def main(argv=None):
     except (ValueError, OSError, Error) as error:
         print(f"check: {error}", file=sys.stderr)
         return getattr(error, "code", 2) if isinstance(error, Error) else 2
-    found, warnings = publication.check_repository(namespace, documents)
+    history = RevisionHistory(repo, args.rev or "HEAD", derive, executable)
+    found, warnings = publication.check_repository(namespace, documents, history.lookup)
     errors += [(r, m) for r, m in found if selected(r)]
     warnings = [(r, m) for r, m in warnings if selected(r)]
     documents = [d for d in documents if selected(d["relpath"])]

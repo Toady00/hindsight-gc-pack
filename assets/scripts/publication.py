@@ -1,4 +1,4 @@
-"""Publication lifecycle policy: identity, per-document gates, and report sets.
+"""Publication lifecycle policy: identity and independent document eligibility.
 
 Pure functions over a scanned manifest and durable publication records. Nothing
 here performs I/O; ``ship_docs`` validates the whole plan before any write.
@@ -13,8 +13,6 @@ of unchanged content, deprecation, supersession, restoration) keeps it.
 """
 
 from copy import deepcopy
-import hashlib
-import json
 import re
 
 FROZEN = frozenset({"superseded", "deprecated"})
@@ -79,7 +77,7 @@ def id_error(document_id, namespace):
     return None
 
 
-def check_repository(namespace, documents):
+def check_repository(namespace, documents, resolve_revision=None):
     """Read-only checks shared by `gc hindsight check` and the publisher.
 
     ``documents`` are dicts with ``relpath`` and the schema ``verdict``. Returns
@@ -89,6 +87,7 @@ def check_repository(namespace, documents):
     errors, warnings = [], []
     by_id = {}
     fingerprints = {}
+    types = {}
     for document in documents:
         verdict = document["verdict"]
         if verdict.get("verdict") == "skip":
@@ -106,6 +105,7 @@ def check_repository(namespace, documents):
             errors.append((document["relpath"], f"{document_id}: {problem}"))
         lifecycle = verdict.get("lifecycle") or {}
         fingerprints[document_id] = lifecycle.get("fingerprint")
+        types[document_id] = lifecycle.get("type")
     for document_id, paths in by_id.items():
         if len(paths) > 1:
             for path in paths:
@@ -116,21 +116,24 @@ def check_repository(namespace, documents):
         if verdict.get("verdict") != "ship" or lifecycle.get("type") != REPORT:
             continue
         for ref in lifecycle.get("assesses", []):
-            if namespace is None or not ref["id"].startswith(namespace + "."):
+            kind = types.get(ref["id"]) if fingerprints.get(ref["id"]) == ref["fingerprint"] else None
+            if kind is None and resolve_revision is not None:
+                try:
+                    kind = resolve_revision(ref["id"], ref["fingerprint"])
+                except (ValueError, OSError) as error:
+                    errors.append((document["relpath"], f"cannot verify assessed revision {ref['id']}: {error}"))
+                    continue
+            if kind == "discussion":
+                errors.append((document["relpath"], f"build report assesses discussion {ref['id']}; remove that "
+                               "assesses entry and republish the report, because discussions add no requirements"))
+            elif namespace is None or not ref["id"].startswith(namespace + "."):
                 errors.append((document["relpath"], f"{verdict['document_id']}: assessed {ref['id']} is outside "
                                "this repository's namespace; reports pin only their own initiative's documents"))
-            elif ref["id"] not in fingerprints:
-                warnings.append((document["relpath"], f"{verdict['document_id']}: assessed {ref['id']} is not a "
-                                 "shippable document here; the report will be held until it is published"))
-            elif fingerprints[ref["id"]] != ref["fingerprint"]:
-                warnings.append((document["relpath"], f"{verdict['document_id']}: assesses {ref['id']} at "
-                                 f"{ref['fingerprint'][:12]}, but the current file is {str(fingerprints[ref['id']])[:12]}; "
-                                 "the current file cannot publish until the report pins it"))
+            elif kind is None:
+                errors.append((document["relpath"], f"{verdict['document_id']}: assessed revision {ref['id']} "
+                               f"at {ref['fingerprint']} is not a valid current or historical document in this "
+                               "repository; verify the ID and fingerprint against the assessed Git revision"))
     return errors, warnings
-
-
-def _hash(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 class Decision:
@@ -146,11 +149,6 @@ def _refs(entry):
     return {ref["id"]: ref["fingerprint"] for ref in entry.get("assesses") or []}
 
 
-def _governs(record):
-    """Every document a published report has ever pinned. Dropping a pin never releases it."""
-    return set(record.get("governs") or []) | set(_refs(record))
-
-
 def classify(candidate, record, bank_hash, ever_accepted_in_git, staged=False):
     """Per-document gate, before report consistency is considered.
 
@@ -161,7 +159,10 @@ def classify(candidate, record, bank_hash, ever_accepted_in_git, staged=False):
     pipeline staged a first publication that never completed, so a bank copy
     without a record is its own partial write, not an unknown baseline.
     """
-    status = candidate["status"]
+    status = candidate.get("status")
+    discussion = candidate["type"] == "discussion"
+    if discussion and "status" in candidate:
+        return Decision("refuse", "discussion records must omit status")
     if record is None:
         if bank_hash is not None and not staged:
             return Decision("refuse", "the bank holds this ID but no publication record establishes its "
@@ -169,7 +170,7 @@ def classify(candidate, record, bank_hash, ever_accepted_in_git, staged=False):
         if status in FROZEN:
             return Decision("refuse", f"a never-published document cannot become {status}: there is no "
                             "published baseline to retire; publish it first or leave it unpublished")
-        if status == "draft" and ever_accepted_in_git:
+        if not discussion and status == "draft" and ever_accepted_in_git:
             return Decision("hold", "this document was accepted in published Git history, and later "
                             "drafts do not publish; accept a revision to publish it")
         return Decision("publish", kind="new")
@@ -186,13 +187,16 @@ def classify(candidate, record, bank_hash, ever_accepted_in_git, staged=False):
     if (record.get("visible", True) and same and candidate["source_hash"] == record.get("source_hash")
             and bank_hash == record.get("source_hash") and candidate["relpath"] == record.get("relpath")):
         return Decision("unchanged")
+    if discussion:
+        # Legacy status/ever_accepted never invalidates a conversation that happened.
+        return Decision("publish", kind="status" if same else "content")
     published = f"{record.get('relpath')} at commit {record.get('commit')}"
     if not same and (record.get("status") in FROZEN or status in FROZEN):
         verb = "is frozen" if record.get("status") in FROZEN else f"can become {status} only"
         return Decision("refuse", f"the published revision ({published}) {verb} with unchanged content: "
                         "only status and updated_at may differ from the last published content. Revert the "
                         "file to the published content, restore accepted status if needed, then make "
-                        "substantive edits as a draft through reapproval and the build gate")
+                         "substantive edits as a draft through reapproval")
     if status == "draft" and ever:
         return Decision("hold", "this document has been accepted; draft revisions after acceptance do not "
                         f"publish. The bank keeps {published}")
@@ -200,7 +204,7 @@ def classify(candidate, record, bank_hash, ever_accepted_in_git, staged=False):
 
 
 def plan(candidates, records, bank_hashes, accepted_ids, staged=frozenset()):
-    """Decide every candidate and group dependent publications into sets.
+    """Decide each candidate independently after repository reference validation.
 
     ``staged`` holds IDs whose first publication this pipeline staged but never
     confirmed.
@@ -212,11 +216,9 @@ def plan(candidates, records, bank_hashes, accepted_ids, staged=frozenset()):
     bank holds to its stored content hash. ``accepted_ids`` holds IDs seen as
     accepted anywhere in published Git history.
 
-    Invariant: after any prefix of the planned writes, every visible report
-    only pins fingerprints the bank holds for the documents it assesses. A
-    document whose content changes therefore needs every governing report to
-    publish an update pinning that exact revision in the same set; acceptance
-    alone never unlocks it. Retired and withdrawn reports keep governing.
+    Reports describe assessed Git revisions, which may be historical and need
+    not be the revisions currently in the bank. They never govern publication
+    of intent. The empty set list keeps legacy callers compatible.
     """
     decisions = {document_id: classify(candidate, records.get(document_id), bank_hashes.get(document_id),
                                        document_id in accepted_ids, document_id in staged)
@@ -225,128 +227,39 @@ def plan(candidates, records, bank_hashes, accepted_ids, staged=frozenset()):
         if candidate["type"] != REPORT or decisions[document_id].action not in ("publish", "unchanged"):
             continue
         outside = [ref for ref in _refs(candidate) if not ref.startswith(candidate["namespace"] + ".")]
+        discussions = [ref for ref, fp in _refs(candidate).items()
+                       if any(entry.get("type") == "discussion" and entry.get("fingerprint") == fp
+                              for entry in (candidates.get(ref) or {}, records.get(ref) or {}))]
+        if discussions:
+            decisions[document_id] = Decision("refuse", "build reports cannot assess discussion records: "
+                                              + ", ".join(sorted(discussions))
+                                              + "; remove those assesses entries and republish the report")
+            continue
         if outside:
             decisions[document_id] = Decision("refuse", "a build report pins only its own initiative's "
                                               "documents; outside its namespace: " + ", ".join(sorted(outside)))
 
-    def eligible(document_id):
-        return document_id in decisions and decisions[document_id].action == "publish"
-
-    def bank_fingerprint(document_id):
-        if eligible(document_id):
-            return candidates[document_id]["fingerprint"]
-        record = records.get(document_id)
-        # A record whose bank copy differs (a failed or unresolved retain)
-        # does not describe what readers see.
-        if not record or bank_hashes.get(document_id) != record.get("source_hash"):
-            return None
-        return record.get("fingerprint")
-
-    def report_state(document_id):
-        """Post-plan status and pins of a report, if it will exist."""
-        if eligible(document_id):
-            return candidates[document_id]["status"], _refs(candidates[document_id])
-        record = records.get(document_id)
-        if record and record.get("type") == REPORT:
-            return record.get("status"), _refs(record)
-        return None, {}
-
-    reports = {i for i, r in records.items() if r.get("type") == REPORT}
-    reports |= {i for i, c in candidates.items() if c["type"] == REPORT}
-    changed = True
-    while changed:
-        changed = False
-        for document_id in sorted(reports):
-            if not eligible(document_id):
-                continue
-            stale = [ref for ref, fp in _refs(candidates[document_id]).items() if bank_fingerprint(ref) != fp]
-            if stale:
-                decisions[document_id] = Decision(
-                    "hold", "pins revisions the bank will not hold after this scan: " + ", ".join(sorted(stale))
-                    + ". Publish the assessed revisions with it, or pin the revisions already published")
-                changed = True
-        for document_id in sorted(candidates):
-            record = records.get(document_id)
-            new = candidates[document_id]["fingerprint"]
-            if not eligible(document_id) or not record or new == record.get("fingerprint"):
-                continue
-            blocking = []
-            for report_id in sorted(reports):
-                # Every published report that pins this document governs it,
-                # retired or currently withdrawn included: retiring a report
-                # never releases what it assessed. Only an eligible update that
-                # pins this exact revision lets the new content through.
-                governing = records.get(report_id)
-                if not governing or document_id not in _governs(governing):
-                    continue
-                status, pins = report_state(report_id)
-                if not eligible(report_id) or status in FROZEN or pins.get(document_id) != new:
-                    blocking.append(report_id)
-            if blocking:
-                decisions[document_id] = Decision(
-                    "hold", "a published build report assesses this document (" + ", ".join(blocking)
-                    + "); its new content is eligible only in the same scan as an updated, evidence-backed report pinning "
-                    "this exact revision")
-                changed = True
-
-    # Group writes that publish as one ordered, non-atomic set.
-    parent = {}
-
-    def find(x):
-        parent.setdefault(x, x)
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def content_change(document_id):
-        record = records.get(document_id)
-        return eligible(document_id) and (not record or record.get("fingerprint") != candidates[document_id]["fingerprint"])
-
-    for report_id in sorted(reports):
-        if not eligible(report_id):
-            continue
-        linked = set(_refs(candidates[report_id]))
-        if report_id in records:
-            linked |= _governs(records[report_id])
-        for ref in linked:
-            if content_change(ref) and ref != report_id:
-                parent[find(ref)] = find(report_id)
-    groups = {}
-    for member in list(parent):
-        groups.setdefault(find(member), []).append(member)
-    sets = []
-    for members in groups.values():
-        report_ids = sorted(m for m in members if candidates[m]["type"] == REPORT)
-        doc_ids = sorted(m for m in members if candidates[m]["type"] != REPORT)
-        if not report_ids or not doc_ids:
-            continue
-        set_id = "set-" + _hash([[m, candidates[m]["fingerprint"], candidates[m]["source_hash"]]
-                                 for m in sorted(members)])[:32]
-        withdraw = sorted(r for r in report_ids if r in records and records[r].get("visible", True)
-                          and _governs(records[r]) & set(doc_ids))
-        for member in members:
-            decisions[member].set_id = set_id
-        sets.append(dict(set_id=set_id, documents=doc_ids, reports=report_ids, withdraw=withdraw))
-    return decisions, sorted(sets, key=lambda s: s["set_id"])
+    return decisions, []
 
 
 def publication_record(candidate, record, set_id, at, ever_accepted_in_git=False):
     """The record that describes a confirmed publication of ``candidate``."""
     previous = record or {}
     result = {key: deepcopy(candidate[key]) for key in (
-        "namespace", "repository", "relpath", "commit", "ref", "type", "status", "fingerprint", "source_hash")}
+        "namespace", "repository", "relpath", "commit", "ref", "type", "fingerprint", "source_hash")}
+    if candidate["type"] != "discussion":
+        result["status"] = candidate["status"]
     result.update(
-        ever_accepted=bool(previous.get("ever_accepted")) or previous.get("status") == "accepted"
-        or candidate["status"] == "accepted" or bool(ever_accepted_in_git),
         visible=True, set=set_id, published_at=at,
         first_published_at=previous.get("first_published_at") or at,
         first_commit=previous.get("first_commit") or candidate["commit"])
+    if candidate["type"] != "discussion":
+        result["ever_accepted"] = (bool(previous.get("ever_accepted")) or previous.get("status") == "accepted"
+                                   or candidate["status"] == "accepted" or bool(ever_accepted_in_git))
     if previous.get("relpath") and previous["relpath"] != candidate["relpath"]:
         result["moved_from"] = previous["relpath"]
     if candidate["type"] == REPORT:
         result["assesses"] = deepcopy(candidate.get("assesses") or [])
-        result["governs"] = sorted(_governs(previous) | set(_refs(candidate)))
         result["outcome"] = candidate.get("outcome")
         result["code"] = deepcopy(candidate.get("code") or [])
     return result
