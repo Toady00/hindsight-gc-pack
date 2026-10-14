@@ -28,7 +28,7 @@ From an external or sibling checkout, supply city context with `GC_CITY`, or run
   stable identity, not a revision counter.
 - IDs are unique in the repository, counting retired (superseded/deprecated)
   documents, which keep their IDs forever.
-- Build reports pin non-discussion document revisions in the same namespace.
+- Build reports pin document revisions in the same namespace, excluding discussions and voice memos.
   Each ID/fingerprint pair must match a valid current document or a historical
   Markdown blob reachable from the selected commit, including moved or deleted
   documents. A report need not assess the latest files or bank-visible revisions.
@@ -46,8 +46,8 @@ From an external or sibling checkout, supply city context with `GC_CITY`, or run
 
 `--fingerprint` prints `<fingerprint>  <id>  <path>` for shippable documents. The
 fingerprint hashes the file with only the values of `status` and `updated_at`
-masked. Discussions omit status, so only `updated_at` is masked for them.
-Build reports pin non-discussion documents in `assesses`.
+masked. Discussions and voice memos omit status, so only `updated_at` is masked for them.
+Build reports pin documents in `assesses`, excluding discussions and voice memos.
 
 Exit codes: `0` clean (warnings allowed), `1` contract violations, each printed
 with repair guidance, `2` invalid invocation or missing tools.

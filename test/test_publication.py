@@ -97,6 +97,35 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(decisions[report_id].action, "refuse")
         self.assertEqual(decisions[document_id].action, "publish")
 
+    def test_voice_memo_migrates_legacy_status_and_cannot_be_a_report_requirement(self):
+        document_id, report_id = "alpha.voice-memo.a.0001", "alpha.build-report.one"
+        current = candidate(document_id, FP["b"], kind="voice-memo")
+        current.pop("status")
+        for status in ["draft", "accepted", "superseded", "deprecated"]:
+            with self.subTest(status=status):
+                previous = dict(record(current), status=status, ever_accepted=True, fingerprint=FP["a"])
+                decisions, _ = self.plan({document_id: current}, {document_id: previous}, {document_id})
+                self.assertEqual(decisions[document_id].action, "publish")
+                updated = publication.publication_record(current, previous, None, "now", True)
+                self.assertNotIn("status", updated)
+                self.assertNotIn("ever_accepted", updated)
+                self.assertEqual(ship_docs._publication({"publication": updated}), updated)
+                self.assertEqual(publication.classify(dict(current, status=status), previous, None, True).action,
+                                 "refuse")
+        report = candidate(report_id, FP["e"], kind="build-report", assesses={document_id: FP["b"]})
+        decisions, _ = self.plan({document_id: current, report_id: report})
+        self.assertEqual(decisions[report_id].action, "refuse")
+        for resolved_kind in ("current", "historical"):
+            with self.subTest(resolved_kind=resolved_kind):
+                documents = [dict(relpath="docs/report.md", verdict=dict(
+                    verdict="ship", document_id=report_id, lifecycle=report))]
+                if resolved_kind == "current":
+                    documents.append(dict(relpath="docs/memo.md", verdict=dict(
+                        verdict="ship", document_id=document_id, lifecycle=current)))
+                errors, _ = publication.check_repository("alpha", documents,
+                                                         resolve_revision=lambda i, f: "voice-memo")
+                self.assertTrue(any("assesses voice-memo" in message for _, message in errors), errors)
+
     def test_legacy_report_in_git_must_drop_discussion_pins_before_publishing(self):
         discussion_id, spec_id, report_id = "alpha.discussion.a.0001", "alpha.spec.a.0001", "alpha.build-report.one"
         discussion = candidate(discussion_id, FP["a"], kind="discussion")
@@ -298,6 +327,22 @@ class SchemaLifecycleTest(unittest.TestCase):
         for status in ["draft", "accepted", "superseded", "deprecated", "null", "recorded"]:
             with self.subTest(status=status):
                 bad = text.replace("type: discussion\n", f"type: discussion\nstatus: {status}\n")
+                self.assertEqual(self.derive(bad)["verdict"], "refuse")
+
+    def test_status_free_voice_memo_context_tags_and_fingerprint(self):
+        text = self.BASE.replace("type: spec", "type: voice-memo").replace("status: draft  # note\n", "")
+        verdict = self.derive(text)
+        self.assertEqual(verdict["verdict"], "ship", verdict)
+        self.assertEqual(verdict["strategy"], "voice-memo")
+        self.assertNotIn("status", verdict["lifecycle"])
+        self.assertFalse(any(t.startswith("status:") for t in verdict["tags"]))
+        self.assertIn("owner thinking, not a decision", verdict["context"])
+        self.assertNotIn("ACCEPTED", verdict["context"])
+        self.assertEqual(self.fingerprint(text), self.fingerprint(text.replace("08-20T00", "09-01T07")))
+        self.assertNotEqual(self.fingerprint(text), self.fingerprint(text + "Another idea.\n"))
+        for status in ["draft", "accepted", "superseded", "deprecated", "null", "recorded"]:
+            with self.subTest(status=status):
+                bad = text.replace("type: voice-memo\n", f"type: voice-memo\nstatus: {status}\n")
                 self.assertEqual(self.derive(bad)["verdict"], "refuse")
 
     def test_only_status_and_updated_at_values_are_masked(self):
@@ -552,6 +597,26 @@ class ShipFlowTest(unittest.TestCase):
         self.assertIn("R2 is deferred", item["content"])
         self.assertFalse(any(t.startswith("status:") for t in item["tags"]))
         self.assertEqual(self.published(spec)["status"], "accepted")
+
+    def test_voice_memo_ships_and_reloads_without_status_or_acceptance_gate(self):
+        memo = self.doc("idea", "draft", "Consider DuckDB for analytics", kind="voice-memo")
+        path = "docs/idea.md"
+        self.files[path] = self.files[path].replace("status: draft\n", "")
+        self.accepted.append(memo)  # Legacy acceptance must not gate a dated memo.
+        self.ship()
+        self.assertNotIn("status", self.published(memo))
+        self.assertNotIn("ever_accepted", self.published(memo))
+        self.bank.events.clear()
+        self.ship()
+        self.assertEqual(self.bank.events, [])
+        self.files[path] += "Still exploratory, costs unknown.\n"
+        self.ship()
+        self.assertEqual(self.bank.events, [("retain", memo)])
+        item = next(v["item"] for v in reversed(list(self.bank.operations.values()))
+                    if v["item"]["document_id"] == memo)
+        self.assertEqual(item["strategy"], "voice-memo")
+        self.assertIn("owner thinking, not a decision", item["context"])
+        self.assertFalse(any(t.startswith("status:") for t in item["tags"]))
 
     def test_partial_assessment_remains_valid_as_accepted_scope_changes(self):
         spec = self.doc("a", "accepted", "R1 v1")
@@ -964,6 +1029,26 @@ class CheckCommandTest(unittest.TestCase):
         self.git("commit", "-qm", "no current discussion")
         self.write_report("alpha.spec.a.0001", discussion_fp)
         self.assertIn("discussion", self.check(code=1).stderr)
+
+    def test_status_bearing_voice_memo_history_keeps_its_original_fingerprint(self):
+        from revision_history import RevisionHistory
+
+        path = self.repo / "docs/a.md"
+        legacy = SchemaLifecycleTest.BASE.replace("type: spec", "type: voice-memo")
+        path.write_text(legacy)
+        masked = legacy.replace("status: draft", "status: __hindsight_lifecycle_mask__")
+        masked = masked.replace("updated_at: 2026-08-20T00:00:00Z", "updated_at: __hindsight_lifecycle_mask__")
+        old_fp = hashlib.sha256(masked.encode()).hexdigest()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "legacy voice memo")
+        path.write_text(legacy.replace("status: draft  # note\n", ""))
+        self.git("add", "-A")
+        self.git("commit", "-qm", "status-free voice memo")
+        history = RevisionHistory(self.repo, "HEAD", ship_docs.derive, DERIVE)
+        self.assertEqual(history.lookup("alpha.spec.a.0001", old_fp), "voice-memo")
+        self.assertNotEqual(self.check("--fingerprint").stdout.split()[0], old_fp)
+        self.write_report("alpha.spec.a.0001", old_fp)
+        self.assertIn("assesses voice-memo", self.check(code=1).stderr)
 
     def test_old_required_fields_and_malformed_out_of_root_history(self):
         notes = self.repo / "notes"

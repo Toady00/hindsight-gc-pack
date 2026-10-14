@@ -27,7 +27,7 @@ RULES = {
         "message": "Body presents this accepted document as currently draft or awaiting approval.",
         "question": "Does `document.body` describe THIS document's current standing as draft, unapproved, or awaiting acceptance?",
         "yes": "A current status banner or statement says this document is a draft or still awaits acceptance.",
-        "no": "No such current self-description. Historical draft status, quotations, code examples, other documents' drafts, and proposed features within an accepted record do not count. Acceptance of a voice memo or survey does not make its contents an adopted design.",
+        "no": "No such current self-description. Historical draft status, quotations, code examples, other documents' drafts, and proposed features within an accepted record do not count. Acceptance of a survey does not make its contents an adopted design.",
     },
     "repo-platform-mandate": {
         "field": "scope", "value": "repo",

@@ -14,8 +14,9 @@ Arguments and stdin pass unchanged to `memory-retain.sh`. That helper owns
 writer admission, contract validation, pending-operation checks, and polling.
 The default bank is `$HINDSIGHT_BANK`. Its existing `--dry-run` mode previews
 a payload without writing and does not require writer admission.
-Discussion records use `--type discussion` with no `--status`; bumps preserve
-that status-free contract. An explicit status for a discussion is refused.
+Discussions and voice memos use `--type discussion` or `--type voice-memo` with
+no `--status`; bumps preserve that status-free contract and drop legacy status
+tags. An explicit status for either type is refused.
 
 This command executes in the foreground, not through a queue. Never overlap
 ship, retain, or maintenance, or copy the writer marker to another session.

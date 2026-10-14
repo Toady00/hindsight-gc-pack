@@ -71,13 +71,14 @@ class SchemaTest(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def test_non_discussion_types_require_status_and_match_audit_vocabulary(self):
+    def test_status_policy_and_types_match_audit_vocabulary(self):
         types = json.loads((PACK / "schemas/docs/audit-vocab.json").read_text())["closed"]["memory_type"]
         self.assertEqual(set(types), set(schema.STRATEGIES))
+        self.assertEqual(schema.STATUS_FREE, ship_docs.publication.STATUS_FREE)
         for kind in types:
             with self.subTest(kind=kind):
                 fields = dict(FIELDS, type=kind, **(REPORT_FIELDS if kind == "build-report" else {}))
-                if kind == "discussion":
+                if kind in {"discussion", "voice-memo"}:
                     with self.assertRaisesRegex(ValueError, "omit status"):
                         schema.validate(fields)
                     del fields["status"]

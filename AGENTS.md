@@ -1,5 +1,20 @@
 # Review Pitfalls
 
+- Shared-bank writer audit, 2026-10-13: maintenance audits the bank-wide
+  `/tags` inventory against `schemas/docs/audit-vocab.json`, not each document's
+  full schema. It cannot attribute findings to writers or detect missing tags,
+  context, or retain strategy. `source:voice-memo` is rejected; `external` means
+  third-party content, not externally managed ingestion. Shipping's GONE check
+  uses document metadata `repo`/`repository`/`relpath`, not explicit ownership;
+  foreign writers must not be assumed pack-owned merely because they annotate
+  a repository. The owner chose status-free voice memos: like discussions,
+  they omit status, bypass acceptance/retirement gates, and cannot be build-report
+  requirements. Preserve historical fingerprints for old status-bearing memos;
+  do not reinterpret their old status as approval of an idea. Protected reference
+  files `retain-contract.md` and `agent-runbook.md` also omit voice-memo status
+  but have other unresolved differences from the validator. Do not silently edit
+  those reference files or live documents.
+
 - Installed Hindsight CLI `0.9.1` animates pretty-mode progress on stdout,
   including captured output: reflect can flood agent logs with `Reflecting...`
   and ANSI fragments. JSON mode skips the spinner. The read adapter now defaults

@@ -106,6 +106,24 @@ class MemoryShellTest(ShellFixture):
                              "--status", "accepted", "--dry-run", input="Conversation", code=2)
         self.assertIn("discussion records must omit --status", result.stderr)
 
+    def test_voice_memo_retain_and_legacy_bump_omit_status(self):
+        result = self.memory("--type", "voice-memo", "--title", "Idea", "--source", "human",
+                             "--scope", "platform", "--dry-run", input="Consider DuckDB.")
+        item = json.loads(result.stdout.split("\n", 1)[1])["items"][0]
+        self.assertEqual(item["strategy"], "voice-memo")
+        self.assertIn("source:human", item["tags"])
+        self.assertIn("owner thinking, not a decision", item["context"])
+        self.assertFalse(any(t.startswith("status:") for t in item["tags"]))
+        self.config["document"] = dict(content="Consider DuckDB.", document_metadata=dict(title="Idea"),
+                                       tags=item["tags"] + ["status:accepted"])
+        result = self.memory("--bump", "--dry-run")
+        bumped = json.loads(result.stdout.split("\n", 1)[1])["items"][0]
+        self.assertFalse(any(t.startswith("status:") for t in bumped["tags"]))
+        result = self.memory("--type", "voice-memo", "--title", "Idea", "--scope", "platform",
+                             "--status", "accepted", "--dry-run", input="Idea", code=2)
+        self.assertIn("voice-memo records must omit --status", result.stderr)
+        self.assertFalse(self.posts())
+
     def test_completion_write_failure_recovers_before_bump_or_content_read(self):
         self.config["completion_write_error"] = True
         self.memory("--title", "Fixture", "--repos", "repo", input="Symptom, cause, fix.", code=5)

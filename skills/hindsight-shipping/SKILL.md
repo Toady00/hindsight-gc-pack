@@ -41,11 +41,11 @@ updated_at: 2026-08-20T15:30:00Z    # revision timestamp; the full-file hash dri
 Types: `adr` `spec` `hld` `prd` `user-journey` `methodology` `convention`
 `current-state` `meeting-notes` `discussion` `voice-memo` `build-report`
 `runbook` `gotcha` `external`. Anything else is refused at ship time.
-Every type except `discussion` requires `status`, including current-state, build-report, gotcha,
-voice-memo, and external. Status never selects extraction strategy; `type` does.
+Every type except `discussion` and `voice-memo` requires `status`, including current-state,
+build-report, gotcha, and external. Status never selects extraction strategy; `type` does.
 Acceptance admits a record without changing its kind of evidence: a survey
-remains an observation and a voice memo remains thinking. Missing status is
-refused for those types. Discussions must omit the field entirely, including null
+remains an observation. Missing status is refused for those types.
+Discussions and voice memos must omit the field entirely, including null
 or synthetic values, and produce no status tag. Legacy bank-native memories of
 other types need an explicit `--status` on first bump.
 
@@ -66,7 +66,7 @@ Rules that bite:
   not a revision number: revise in place, never mint `.0002` for an edit.
   IDs are unique across the bank, retired documents included; never reuse
   one for a different document or type.
-- **One status vocabulary for non-discussion types.** Not "final", not
+- **One status vocabulary for types other than discussion and voice-memo.** Not "final", not
   "approved", not "proposed" — `draft | accepted | superseded | deprecated`.
 - **`source` is human-in-the-loop for this revision**, not authorship
   history. You (an agent) write `source: agent`. It becomes `human` only
@@ -77,7 +77,7 @@ Rules that bite:
   **`domains` are bounded contexts** — never path-taxonomy values like
   `platform` (that's a scope). Copy existing spellings; never mint
   variants.
-- **Docs are never deleted** — preserve discussion history; for other types mark `deprecated` (or `superseded`) and
+- **Docs are never deleted** — preserve discussions and voice memos; for other types mark `deprecated` (or `superseded`) and
   let the sync re-ship them. Change *only* `status` (and `updated_at`)
   when you do: retirement applies to the last published content. Cross-reference related doc ids in the body
   (frontmatter is stripped at ship; body text is what survives into
@@ -85,14 +85,15 @@ Rules that bite:
 
 ## Publication lifecycle
 
-Status belongs to each non-discussion document. Approval of intent never proves
+Status belongs to each document except discussions and voice memos. Approval of intent never proves
 implementation; only a build report is implementation evidence.
 
-Discussions ship without acceptance and never become accepted or retired.
-To migrate an existing discussion, remove only its `status` field and retain its
+Discussions and voice memos ship without acceptance and never become accepted or retired.
+Voice memos preserve dated owner ideas, concerns and priorities, not settled decisions.
+To migrate an existing discussion or voice memo, remove only its `status` field and retain its
 stable ID, provenance and history. Its next publication replaces legacy status
 tags and lifecycle metadata; earlier acceptance or retirement does not hold it.
-Remove any legacy discussion entries from a build report's `assesses` and
+Remove any legacy discussion or voice-memo entries from a build report's `assesses` and
 republish the report. Until repaired, that report is refused and scans are incomplete.
 
 - **Before first acceptance** every pushed draft revision publishes.
@@ -116,8 +117,8 @@ The **fingerprint** identifies a revision for these rules: the file with only
 the `status` and `updated_at` values masked (`gc hindsight check
 --fingerprint <path>`). Keep each of those fields as one plain top-level
 `key: value` line; duplicates or multi-line forms are refused. Note that
-changing `source` changes the fingerprint. A discussion has no status line, so
-only its `updated_at` value is masked.
+changing `source` changes the fingerprint. Discussions and voice memos have no status line, so
+only their `updated_at` value is masked.
 
 **Build reports** add three frontmatter fields:
 
@@ -133,7 +134,7 @@ code:                         # resulting code state per assessed repository
 ```
 
 Quote fingerprints and SHAs (YAML reads an all-digit SHA as a number). Pin
-only the initiative's own non-discussion documents; references elsewhere are body text and
+only the initiative's own documents, excluding discussions and voice memos; references elsewhere are body text and
 do not extend the assessment. Only build reports may carry `outcome`, `assesses`
 or `code`. Keep reports `status: draft`, `source: agent`: a human-accepted
 report is subject to rule 2 like any document, so its later agent drafts are

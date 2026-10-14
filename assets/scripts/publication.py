@@ -20,6 +20,7 @@ ACTIVE = frozenset({"draft", "accepted"})
 RESERVED = frozenset({"rig", "city"})
 NAMESPACE = re.compile(r"[a-z0-9][a-z0-9_-]*\Z")
 REPORT = "build-report"
+STATUS_FREE = frozenset({"discussion", "voice-memo"})
 NAMESPACE_FILE = ".hindsight-namespace"
 
 
@@ -123,9 +124,9 @@ def check_repository(namespace, documents, resolve_revision=None, resolve_legacy
                 except (ValueError, OSError) as error:
                     errors.append((document["relpath"], f"cannot verify assessed revision {ref['id']}: {error}"))
                     continue
-            if kind == "discussion":
-                errors.append((document["relpath"], f"build report assesses discussion {ref['id']}; remove that "
-                               "assesses entry and republish the report, because discussions add no requirements"))
+            if kind in STATUS_FREE:
+                errors.append((document["relpath"], f"build report assesses {kind} {ref['id']}; remove that "
+                               "assesses entry and republish the report, because status-free records add no requirements"))
             elif namespace is None or not ref["id"].startswith(namespace + "."):
                 try:
                     legacy = (namespace is not None and kind is not None and resolve_legacy is not None
@@ -171,9 +172,9 @@ def classify(candidate, record, bank_hash, ever_accepted_in_git, staged=False):
     without a record is its own partial write, not an unknown baseline.
     """
     status = candidate.get("status")
-    discussion = candidate["type"] == "discussion"
-    if discussion and "status" in candidate:
-        return Decision("refuse", "discussion records must omit status")
+    status_free = candidate["type"] in STATUS_FREE
+    if status_free and "status" in candidate:
+        return Decision("refuse", f"{candidate['type']} records must omit status")
     if record is None:
         if bank_hash is not None and not staged:
             return Decision("refuse", "the bank holds this ID but no publication record establishes its "
@@ -181,7 +182,7 @@ def classify(candidate, record, bank_hash, ever_accepted_in_git, staged=False):
         if status in FROZEN:
             return Decision("refuse", f"a never-published document cannot become {status}: there is no "
                             "published baseline to retire; publish it first or leave it unpublished")
-        if not discussion and status == "draft" and ever_accepted_in_git:
+        if not status_free and status == "draft" and ever_accepted_in_git:
             return Decision("hold", "this document was accepted in published Git history, and later "
                             "drafts do not publish; accept a revision to publish it")
         return Decision("publish", kind="new")
@@ -198,8 +199,8 @@ def classify(candidate, record, bank_hash, ever_accepted_in_git, staged=False):
     if (record.get("visible", True) and same and candidate["source_hash"] == record.get("source_hash")
             and bank_hash == record.get("source_hash") and candidate["relpath"] == record.get("relpath")):
         return Decision("unchanged")
-    if discussion:
-        # Legacy status/ever_accepted never invalidates a conversation that happened.
+    if status_free:
+        # Legacy status/ever_accepted never invalidates a dated conversation or memo.
         return Decision("publish", kind="status" if same else "content")
     published = f"{record.get('relpath')} at commit {record.get('commit')}"
     if not same and (record.get("status") in FROZEN or status in FROZEN):
@@ -242,12 +243,12 @@ def plan(candidates, records, bank_hashes, accepted_ids, staged=frozenset(), leg
         outside = [ref for ref, fp in _refs(candidate).items()
                    if not ref.startswith(candidate["namespace"] + ".")
                    and (document_id, ref, fp) not in legacy_references]
-        discussions = [ref for ref, fp in _refs(candidate).items()
-                       if any(entry.get("type") == "discussion" and entry.get("fingerprint") == fp
-                              for entry in (candidates.get(ref) or {}, records.get(ref) or {}))]
-        if discussions:
-            decisions[document_id] = Decision("refuse", "build reports cannot assess discussion records: "
-                                              + ", ".join(sorted(discussions))
+        status_free_refs = [ref for ref, fp in _refs(candidate).items()
+                            if any(entry.get("type") in STATUS_FREE and entry.get("fingerprint") == fp
+                                   for entry in (candidates.get(ref) or {}, records.get(ref) or {}))]
+        if status_free_refs:
+            decisions[document_id] = Decision("refuse", "build reports cannot assess discussion or voice-memo records: "
+                                              + ", ".join(sorted(status_free_refs))
                                               + "; remove those assesses entries and republish the report")
             continue
         if outside:
@@ -262,13 +263,13 @@ def publication_record(candidate, record, set_id, at, ever_accepted_in_git=False
     previous = record or {}
     result = {key: deepcopy(candidate[key]) for key in (
         "namespace", "repository", "relpath", "commit", "ref", "type", "fingerprint", "source_hash")}
-    if candidate["type"] != "discussion":
+    if candidate["type"] not in STATUS_FREE:
         result["status"] = candidate["status"]
     result.update(
         visible=True, set=set_id, published_at=at,
         first_published_at=previous.get("first_published_at") or at,
         first_commit=previous.get("first_commit") or candidate["commit"])
-    if candidate["type"] != "discussion":
+    if candidate["type"] not in STATUS_FREE:
         result["ever_accepted"] = (bool(previous.get("ever_accepted")) or previous.get("status") == "accepted"
                                    or candidate["status"] == "accepted" or bool(ever_accepted_in_git))
     if previous.get("relpath") and previous["relpath"] != candidate["relpath"]:

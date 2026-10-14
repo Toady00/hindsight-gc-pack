@@ -87,12 +87,15 @@ Comparing current Git files alone cannot establish what was assessed. Read the t
 | `status:accepted` + `source:agent` | standing position from a trusted workflow, never human-reviewed |
 | `status:superseded` / `deprecated` | history, kept queryable on purpose |
 | `memory_type:discussion` with no `status:` | dated conversation history, including deferred ideas; not approved scope |
+| `memory_type:voice-memo` with no `status:` | dated owner thinking, ideas, concerns and priorities; not a settled decision |
 | other records with no `status:` | legacy or malformed record; do not infer acceptance |
 
-Every non-discussion document requires status, including surveys, voice memos, build
+Every document except discussions and voice memos requires status, including surveys, build
 reports, and gotchas. Acceptance admits the record; its type still determines
-what it establishes. An accepted survey is an observation, and an accepted
-voice memo is thinking, never a platform decision.
+what it establishes. An accepted survey is an observation. Voice memos have no
+acceptance or retirement lifecycle. `source:human` identifies human speech or
+human involvement in the revision, not transcript review or approval of an idea.
+Legacy status tags on a voice memo do not make its ideas settled decisions.
 
 The read command resolves the same endpoint and credential as shipping,
 including the legacy `HINDSIGHT_API` alias.

@@ -106,12 +106,12 @@ managed session; exit 0 means queued, not shipped. Follow the formula bead for
 completion. `gc hindsight ship --dry-run` previews locally without retaining or
 updating health, but still fetches Git and reads the bank and city Beads store.
 The first word after `gc` is your import binding name.
-Revise by editing in place; preserve discussion history, and retire other document
-types with `status: deprecated` rather than deleting them. Discussions omit status
+Revise by editing in place; preserve discussions and voice memos, and retire other document
+types with `status: deprecated` rather than deleting them. Discussions and voice memos omit status
 and ship without acceptance. They preserve dated reasoning and deferred ideas;
-later scope decisions do not supersede or deprecate the conversation. Hindsight
+later scope decisions do not supersede or deprecate the conversation or memo. Hindsight
 handles temporal context, while approved intent defines what to build. Status is
-per non-discussion document, and after first acceptance new drafts do not publish;
+per other document, and after first acceptance new drafts do not publish;
 see "The shipping contract". `gc hindsight check`
 validates a repository's documents locally, read-only.
 
@@ -208,10 +208,11 @@ assistance, proposal intake, and candidate selection experiments.
 
 Git holds every revision. The bank is the city-wide record of the relevant
 **published** revision of each document: the last revision that was eligible to
-publish. Discussions have no status and ship independently of acceptance or
+publish. Discussions and voice memos have no status and ship independently of acceptance or
 report pins. Preserve dated reasoning and deferred ideas; later decisions do not
-retire the conversation. Migrate by removing its status while preserving ID,
-provenance and history. Remove legacy discussion pins from reports and republish
+retire the conversation or memo. A voice memo preserves owner thinking, never settled decisions.
+Migrate by removing its status while preserving ID,
+provenance and history. Remove legacy discussion and voice-memo pins from reports and republish
 those reports; until repaired they are refused and scans stay incomplete.
 Status belongs to each other document (`draft | accepted | superseded |
 deprecated`), never to an initiative or a set. The shipper enforces these rules
@@ -273,11 +274,11 @@ lines, and any parse that does not match the masked text are refused, so the
 exemption can never widen to other fields or the body. `gc hindsight check
 --fingerprint` prints it. A schema without lifecycle output falls back to the
 whole-file hash, which leaves it no status-only changes.
-Discussions have no status line, so only `updated_at` is masked for them.
+Discussions and voice memos have no status line, so only `updated_at` is masked for them.
 
 **Build reports** (`type: build-report`) carry `outcome: passed | partial |
 failed`, `assesses` (each `{id, fingerprint}` of an initiative-owned document in
-the same namespace, excluding discussions), and `code` (each `{repo, commit}`). Quote fingerprints and
+the same namespace, excluding discussions and voice memos), and `code` (each `{repo, commit}`). Quote fingerprints and
 SHAs: YAML reads an all-digit SHA as a number. A report is implementation
 evidence. Its publication is not human approval, not proof that every target
 requirement shipped, and not deployment. External references to other
@@ -573,8 +574,8 @@ Retrieval scoping is unaffected by residency: agent memories carry full
 
 ## Deleting from the bank (manual, break-glass)
 
-The pack never deletes. Preserve discussion history; retire-in-place (`status: deprecated`) is the
-in-band mechanism, and the archivist's hard rules forbid destructive
+The pack never deletes. Preserve discussions and voice memos; other document types
+retire in place with `status: deprecated`. The archivist's hard rules forbid destructive
 ops. But a human removing pure noise (a premature doc, a pivoted
 direction) is legitimate. The procedure differs by kind:
 
@@ -591,7 +592,7 @@ direction) is legitimate. The procedure differs by kind:
   half-done" reminder, by design — report-only, never auto-removed.
 
 Deletion erases the bank's copy only; anything else that referenced the
-doc id in body text keeps its dangling reference. Preserve discussions whenever
+doc id in body text keeps its dangling reference. Preserve discussions and voice memos whenever
 their history has value; prefer deprecation for other document types.
 
 ---

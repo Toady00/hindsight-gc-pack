@@ -3,7 +3,7 @@
 
 ``validate`` checks parsed frontmatter. ``fingerprint`` identifies a revision
 for the publication lifecycle: the exact file bytes with only the values of the
-top-level ``status`` and ``updated_at`` lines masked. Discussions omit status,
+top-level ``status`` and ``updated_at`` lines masked. Discussions and voice memos omit status,
 so only their updated_at value is masked. Everything else, including
 ``source``, ``id``, comments, and the body, stays significant.
 """
@@ -26,6 +26,7 @@ STRATEGIES = {
     "gotcha": "gotcha", "external": "source-document",
 }
 STATUS = {"draft", "accepted", "superseded", "deprecated"}
+STATUS_FREE = frozenset({"discussion", "voice-memo"})
 OUTCOMES = {"passed", "partial", "failed"}
 ATOM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
@@ -91,9 +92,9 @@ def validate(doc):
     kind = doc["type"]
     if kind not in STRATEGIES:
         raise ValueError(f"unknown type '{kind}'")
-    if kind == "discussion":
+    if kind in STATUS_FREE:
         if "status" in doc:
-            raise ValueError("discussion records must omit status")
+            raise ValueError(f"{kind} records must omit status")
     elif not isinstance(doc.get("status"), str) or doc["status"] not in STATUS:
         raise ValueError("missing or invalid status")
     for field, values in (("scope", {"business", "platform", "repo"}), ("source", {"human", "agent", "external"})):
@@ -151,7 +152,7 @@ def validate(doc):
         context += "; repo " + ", ".join(repos)
     if kind == "discussion":
         context += "; DISCUSSION record, conversation history including deferred ideas; not approved direction or implementation evidence"
-    else:
+    elif kind not in STATUS_FREE:
         context += {
         "draft": "; DRAFT assessment, not human-reviewed" if report else "; DRAFT, not current platform direction",
         "accepted": "; ACCEPTED record; its document type determines what it establishes",
@@ -160,11 +161,11 @@ def validate(doc):
         }[doc["status"]]
     tags = ([f"scope:{doc['scope']}"] + [f"repo:{v}" for v in repos] + [f"domain:{v}" for v in domains]
             + [f"memory_type:{kind}", f"source:{doc['source']}"])
-    if kind != "discussion":
+    if kind not in STATUS_FREE:
         tags.append(f"status:{doc['status']}")
     scopes = [[f"domain:{v}"] for v in domains] + [[f"repo:{v}"] for v in repos] + [[f"scope:{doc['scope']}"]]
     lifecycle = dict(type=kind)
-    if kind != "discussion":
+    if kind not in STATUS_FREE:
         lifecycle["status"] = doc["status"]
     if report:
         lifecycle.update(report)
@@ -216,7 +217,7 @@ def fingerprint(text, parsed, parse=_yq, masked_fields=None):
     or flow-mapped duplicate, or a boundary disagreement cannot widen the mask.
     """
     if masked_fields is None:
-        masked_fields = ("updated_at",) if parsed.get("type") == "discussion" else MASKED
+        masked_fields = ("updated_at",) if parsed.get("type") in STATUS_FREE else MASKED
     masked = masked_text(text, masked_fields)
     expected = dict(parsed, **{key: MASK for key in masked_fields})
     if parse(masked) != expected:
@@ -236,7 +237,7 @@ def historical_revision(text, parsed, wanted):
     identity, kind = parsed.get("id"), parsed.get("type")
     if not isinstance(identity, str) or not ATOM.fullmatch(identity) or not isinstance(kind, str) or kind not in STRATEGIES:
         raise ValueError("historical revision needs a stable ID and known document type")
-    fields = MASKED if kind != "discussion" or "status" in parsed else ("updated_at",)
+    fields = MASKED if kind not in STATUS_FREE or "status" in parsed else ("updated_at",)
     try:
         actual = fingerprint(text, parsed, masked_fields=fields)
     except ValueError:

@@ -97,14 +97,14 @@ def derive(document, executable):
             raise ValueError("schema must emit string tags")
         statuses = [tag for tag in tags if tag.startswith("status:")]
         lifecycle = verdict.get("lifecycle")
-        discussion = isinstance(lifecycle, dict) and lifecycle.get("type") == "discussion"
-        if discussion and (statuses or "status" in verdict["lifecycle"]):
+        status_free = isinstance(lifecycle, dict) and lifecycle.get("type") in publication.STATUS_FREE
+        if status_free and (statuses or "status" in verdict["lifecycle"]):
             return dict(verdict="refuse", document_id=verdict["document_id"],
-                        reason="discussion records must omit status tags and lifecycle status")
-        if not discussion and (len(statuses) != 1 or statuses[0] not in {"status:" + s for s in ("draft", "accepted", "superseded", "deprecated")}):
+                        reason=f"{lifecycle['type']} records must omit status tags and lifecycle status")
+        if not status_free and (len(statuses) != 1 or statuses[0] not in {"status:" + s for s in ("draft", "accepted", "superseded", "deprecated")}):
             return dict(verdict="refuse", document_id=verdict["document_id"],
                         reason="schema must emit exactly one valid status tag")
-        problem = lifecycle_error(verdict.get("lifecycle"), None if discussion else statuses[0][len("status:"):])
+        problem = lifecycle_error(verdict.get("lifecycle"), None if status_free else statuses[0][len("status:"):])
         if problem:
             return dict(verdict="refuse", document_id=verdict["document_id"], reason=problem)
         return verdict
@@ -165,9 +165,9 @@ def candidate_from(document, verdict, source_hash, namespace):
     lifecycle = verdict.get("lifecycle") or {}
     if not isinstance(lifecycle, dict):
         raise Error("schema lifecycle must be an object", 1)
-    discussion = lifecycle.get("type") == "discussion"
-    status = None if discussion else statuses[0]
-    if (discussion and (statuses or "status" in lifecycle)
+    status_free = lifecycle.get("type") in publication.STATUS_FREE
+    status = None if status_free else statuses[0]
+    if (status_free and (statuses or "status" in lifecycle)
             or not isinstance(lifecycle, dict) or lifecycle.get("status", status) != status):
         raise Error("schema lifecycle status disagrees with its status tag", 1)
     fingerprint = lifecycle.get("fingerprint") or source_hash
@@ -176,7 +176,7 @@ def candidate_from(document, verdict, source_hash, namespace):
     candidate = dict(namespace=namespace, repository=document["repository"], relpath=document["relpath"],
                      commit=document["commit"], ref=document["ref"], type=lifecycle.get("type") or "",
                       fingerprint=fingerprint, source_hash=source_hash)
-    if not discussion:
+    if not status_free:
         candidate["status"] = status
     if candidate["type"] == publication.REPORT:
         if lifecycle_error(lifecycle, statuses[0]):
@@ -239,7 +239,7 @@ def _publication(data):
     if record is None:
         return None
     if (not isinstance(record, dict) or not isinstance(record.get("fingerprint"), str)
-            or (not (record.get("type") == "discussion" and "status" not in record)
+            or (not (record.get("type") in publication.STATUS_FREE and "status" not in record)
                 and record.get("status") not in ("draft", "accepted", "superseded", "deprecated"))
             or not isinstance(record.get("repository"), str)):
         raise Error(f"invalid publication record for {data.get('document_id')}; manual inspection required")

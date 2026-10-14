@@ -1,41 +1,41 @@
 # Operating the memory pack
 
-The default docs schema requires `status` on every non-discussion document. `type` still
+The default docs schema requires `status` except on discussions and voice memos. `type` still
 selects extraction strategy. `status` records draft, accepted, superseded, or
 deprecated. These are separate decisions. Accepting a survey records its
 standing as an observation; it does not make its contents a platform decision.
-Accepting a voice memo does not turn thinking into an adopted plan.
+Voice memos are status-free records of owner thinking, never settled platform decisions.
 
 Required fields are `id`, `type`, `title`, `status`, `source`, `scope`, and
-`updated_at`, except discussion records must omit `status`. Timestamps must be valid RFC 3339 values with a timezone. Repos
+`updated_at`, except discussions and voice memos must omit `status`. Timestamps must be valid RFC 3339 values with a timezone. Repos
 and domains must be arrays of nonempty tag values. Repo-scoped documents need
 at least one repo. If present, `schema_version` must be 2. A document with
 schema markers but missing required fields is refused, not silently skipped.
 The raw `null` dialect and custom schema verdicts must also carry exactly one
-valid `status:` tag, except an explicit `lifecycle.type: discussion` must omit
+valid `status:` tag, except an explicit `lifecycle.type` of `discussion` or `voice-memo` must omit
 both lifecycle status and status tags; remaining vocabulary stays operator-owned.
 
-Existing non-discussion documents without status need a deliberate source edit. Choose the
+Other existing documents without status need a deliberate source edit. Choose the
 status; do not assign `accepted` in bulk to get past validation. This also
 applies to survey producers: older producers that omit `status` need an
 explicit update. Do not bypass validation or infer acceptance. No automatic
 migration changes documents or the bank. Existing bank-native memories without
-status require `gc hindsight retain --bump --id <id> --status <chosen-status>`.
-New arbitrated memories default to accepted because the archivist has accepted
+status, except discussions and voice memos, require `gc hindsight retain --bump --id <id> --status <chosen-status>`.
+Other new arbitrated memories default to accepted because the archivist has accepted
 the proposal. Type and source continue to qualify what that acceptance means.
 
-Discussion records ship without acceptance and never become accepted, superseded
+Discussions and voice memos ship without acceptance and never become accepted, superseded
 or deprecated. Preserve dated reasoning and deferred ideas when scope narrows;
 later records can revisit them. Hindsight handles temporal context. Their content
-is evidence of conversation, not approved scope or implementation, and reports
-cannot pin it. Migrate a legacy discussion by removing its `status` field while
+is evidence of conversation or owner thinking, not approved scope or implementation, and reports
+cannot pin it. Migrate a legacy discussion or voice memo by removing its `status` field while
 preserving ID, provenance and history. The next publication replaces legacy status
 tags and metadata even if old Git history or receipts marked it accepted or retired.
-Bank-native discussion bumps need no `--status` and reject an explicit one.
-If a legacy build report pins a discussion, remove that discussion entry from
+Bank-native discussion and voice-memo bumps need no `--status` and reject an explicit one.
+If a legacy build report pins a discussion or voice memo, remove that entry from
 `assesses` and republish the report with its valid intent pins. Until repaired,
 the report is refused and scans remain incomplete, but valid intent can still
-publish independently. In OMG, the next maintained build report must omit those discussion pins.
+publish independently. In OMG, the next maintained build report must omit those discussion and voice-memo pins.
 
 ## Shipping and connection settings
 

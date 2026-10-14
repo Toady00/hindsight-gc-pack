@@ -20,7 +20,7 @@
 #   --repos <a,b>          rig names this memory bites (repo: tags — retrieval)
 #   --domains <a,b>        bounded contexts, if any
 #   --scope <s>            business|platform|repo (default: repo)
-#   --status <s>           draft|accepted|superseded|deprecated (new arbitrated memories default accepted)
+#   --status <s>           draft|accepted|superseded|deprecated (omit for discussion/voice-memo; other new memories default accepted)
 #   --source <s>           human|agent|external (default: agent)
 #   --bump                 repeat report: fetch the existing doc, increment
 #                          hit_count, refresh the report line and timestamp,
@@ -110,7 +110,7 @@ if $BUMP; then
   [[ -n "$SCOPE" ]] || SCOPE="$(jq -r '[.[] | select(startswith("scope:")) | sub("^scope:";"")] | first // "'"$SCOPE"'"' <<<"$tags_json")"
   [[ -n "$SOURCE" ]] || SOURCE="$(jq -r '[.[] | select(startswith("source:")) | sub("^source:";"")] | first // "'"$SOURCE"'"' <<<"$tags_json")"
   [[ -n "$TYPE" ]] || TYPE="$(jq -r '[.[] | select(startswith("memory_type:")) | sub("^memory_type:";"")] | first // "'"$TYPE"'"' <<<"$tags_json")"
-  if [[ "$TYPE" != discussion ]]; then
+  if [[ "$TYPE" != discussion && "$TYPE" != voice-memo ]]; then
     [[ -n "$STATUS" ]] || STATUS="$(jq -r '[.[] | select(startswith("status:")) | sub("^status:";"")] | first // ""' <<<"$tags_json")"
     [[ -n "$STATUS" ]] || { echo "legacy memory has no status; choose --status explicitly" >&2; exit 2; }
   fi
@@ -120,8 +120,8 @@ else
   if [[ -n "$CONTENT_FILE" ]]; then CONTENT="$(cat "$CONTENT_FILE")"; else CONTENT="$(cat)"; fi
   [[ -n "$CONTENT" ]] || { echo "no content (stdin or --content-file)" >&2; exit 2; }
 fi
-if [[ "$TYPE" == discussion ]]; then
-  $STATUS_SET && { echo "discussion records must omit --status" >&2; exit 2; }
+if [[ "$TYPE" == discussion || "$TYPE" == voice-memo ]]; then
+  $STATUS_SET && { echo "$TYPE records must omit --status" >&2; exit 2; }
   STATUS=""
 fi
 
@@ -135,7 +135,7 @@ CONTENT="$(printf '%s\n\nReported %s %s (last: %s).\n' "$(printf '%s' "$CONTENT"
 repos_json="$(jq -cRn --arg s "$REPOS" '$s | split(",") | map(select(length>0))')"
 domains_json="$(jq -cRn --arg s "$DOMAINS" '$s | split(",") | map(select(length>0))')"
 verdict="$(jq -cn --arg id "$ID" --arg title "$TITLE" --arg type "$TYPE" --arg scope "$SCOPE" --arg source "$SOURCE" --arg status "$STATUS" --arg updated_at "$NOW" --argjson repos "$repos_json" --argjson domains "$domains_json" \
-  '{id:$id,title:$title,type:$type,scope:$scope,source:$source,updated_at:$updated_at,repos:$repos,domains:$domains} + (if $type == "discussion" then {} else {status:$status} end)' \
+  '{id:$id,title:$title,type:$type,scope:$scope,source:$source,updated_at:$updated_at,repos:$repos,domains:$domains} + (if ($type == "discussion" or $type == "voice-memo") then {} else {status:$status} end)' \
   | python3 "$PACK_DIR/schemas/docs/validate.py")"
 [[ "$(jq -r .verdict <<<"$verdict")" == "ship" ]] || { jq -r '.reason // "invalid memory"' <<<"$verdict" >&2; exit 2; }
 STRATEGY="$(jq -r .strategy <<<"$verdict")"
