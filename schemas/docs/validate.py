@@ -31,7 +31,7 @@ OUTCOMES = {"passed", "partial", "failed"}
 ATOM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z|[0-9a-f]{64}\Z")
-REPORT_FIELDS = ("outcome", "assesses", "code")
+REPORT_FIELDS = ("outcome", "assesses", "code", "assesses_beads")
 MASK = "__hindsight_lifecycle_mask__"
 MASKED = ("status", "updated_at")
 
@@ -49,10 +49,25 @@ def strict_json(text):
 
 
 def _report(doc):
-    outcome, assesses, code = (doc.get(k) for k in REPORT_FIELDS)
+    outcome, assesses, code = (doc.get(k) for k in ("outcome", "assesses", "code"))
     if not isinstance(outcome, str) or outcome not in OUTCOMES:
         raise ValueError("build-report outcome must be passed, partial or failed")
-    if not isinstance(assesses, list) or not assesses:
+    beads = doc.get("assesses_beads", [])
+    if not isinstance(beads, list):
+        raise ValueError("assesses_beads must be a list")
+    identities = set()
+    for entry in beads:
+        if (not isinstance(entry, dict) or set(entry) != {"store", "id", "proposal_sha256"}
+                or not isinstance(entry["store"], str)
+                or not re.fullmatch(r"(?:city|rig):[A-Za-z0-9][A-Za-z0-9._-]*", entry["store"])
+                or not isinstance(entry["id"], str) or not ATOM.fullmatch(entry["id"])
+                or not isinstance(entry["proposal_sha256"], str) or not HEX.fullmatch(entry["proposal_sha256"])):
+            raise ValueError("each assesses_beads entry needs store, id and quoted proposal_sha256")
+        identity = (entry["store"], entry["id"])
+        if identity in identities:
+            raise ValueError("duplicate assessed bead")
+        identities.add(identity)
+    if not isinstance(assesses, list) or (not assesses and not beads):
         raise ValueError("build-report assesses must list the exact document revisions it assessed")
     seen = set()
     for entry in assesses:
@@ -74,7 +89,10 @@ def _report(doc):
         if entry["repo"] in repos:
             raise ValueError("duplicate code repo entry")
         repos.add(entry["repo"])
-    return dict(outcome=outcome, assesses=[dict(e) for e in assesses], code=[dict(e) for e in code])
+    result = dict(outcome=outcome, assesses=[dict(e) for e in assesses], code=[dict(e) for e in code])
+    if beads:
+        result["assesses_beads"] = [dict(e) for e in beads]
+    return result
 
 
 def validate(doc):
@@ -142,10 +160,14 @@ def validate(doc):
     if report:
         # Evidence of what was built, never approval of intent or deployment.
         context += (f"; IMPLEMENTATION EVIDENCE, build outcome {report['outcome'].upper()}; assesses "
-                    + ", ".join(f"{e['id']} at fingerprint {e['fingerprint']}" for e in report["assesses"])
+                    + (", ".join(f"{e['id']} at fingerprint {e['fingerprint']}" for e in report["assesses"]) or "no Git intent documents")
                     + "; code " + ", ".join(f"{e['repo']} at {e['commit']}" for e in report["code"])
                     + "; may assess historical intent; newer scope is unassessed unless explicitly assessed"
                     + "; not approval, deployment, or proof that every target requirement shipped")
+    if report and report.get("assesses_beads"):
+        context += "; tracked-work assessment " + ", ".join(
+            f"{e['store']}/{e['id']} proposal {e['proposal_sha256']}" for e in report["assesses_beads"])
+        context += "; producer verifies bead evidence; not a Git-document approval"
     if domains:
         context += "; domain " + ", ".join(domains)
     if repos:

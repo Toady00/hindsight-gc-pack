@@ -165,6 +165,18 @@ Before pushing, run `gc hindsight check` (read-only; the shipper runs the same
 checks). `gc hindsight ship --dry-run` previews HELD and REFUSED decisions
 that depend on publication history.
 
+## Reports of tracked bug fixes
+
+A report-only bug-fix initiative may use `assesses: []` with a nonempty
+`assesses_beads` list. Each entry contains exactly `store` (for example
+`rig:widgets`), `id` (the bug bead), and quoted `proposal_sha256` (SHA-256 of
+the exact proposed-fix text). The producing workflow verifies approval and
+execution against that proposal. Hindsight validates the reference shape, not
+the live Beads store. Include the problem, proposed behavior, fix and verification
+in the report body so it remains understandable without the bead. These are
+implementation assessments, not new approved requirements. Bugs and spikes are
+not ingested. Ordinary document assessment references retain their Git checks.
+
 ## Recording approval — the contract rules
 
 *How* approval happens (gates, reviews, sign-off flows) belongs to your

@@ -276,6 +276,8 @@ def publication_record(candidate, record, set_id, at, ever_accepted_in_git=False
         result["moved_from"] = previous["relpath"]
     if candidate["type"] == REPORT:
         result["assesses"] = deepcopy(candidate.get("assesses") or [])
+        if candidate.get("assesses_beads"):
+            result["assesses_beads"] = deepcopy(candidate["assesses_beads"])
         if candidate.get("legacy_assesses"):
             result["legacy_assesses"] = deepcopy(candidate["legacy_assesses"])
         result["outcome"] = candidate.get("outcome")

@@ -182,6 +182,8 @@ def candidate_from(document, verdict, source_hash, namespace):
         if lifecycle_error(lifecycle, statuses[0]):
             raise Error("schema emitted an invalid build-report lifecycle", 1)
         candidate.update({key: lifecycle.get(key) for key in ("assesses", "outcome", "code")})
+        if lifecycle.get("assesses_beads"):
+            candidate["assesses_beads"] = lifecycle["assesses_beads"]
     return candidate
 
 

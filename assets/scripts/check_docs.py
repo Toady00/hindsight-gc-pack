@@ -10,6 +10,7 @@ the city's publication records. The publisher runs these same checks, then
 enforces that history; a document passing here can still be held there.
 """
 import argparse
+import json
 import os
 from pathlib import Path
 import sys
@@ -64,9 +65,23 @@ def main(argv=None):
     parser.add_argument("--schema", default=os.environ.get("HINDSIGHT_SCHEMA") or str(PACK / "schemas/docs"))
     parser.add_argument("--fingerprint", action="store_true",
                         help="print each shippable document's lifecycle fingerprint, ID and path")
+    parser.add_argument("--capabilities", action="store_true", help="probe the selected schema's tracked-work report support as JSON")
     parser.add_argument("paths", nargs="*", help="files or directories inside one repository (default: docs)")
     args = parser.parse_args(argv)
     try:
+        if args.capabilities:
+            content = (
+                "---\nschema_version: 2\nid: probe.build-report.bug\ntype: build-report\n"
+                "title: Schema capability probe\nstatus: draft\nsource: agent\nscope: platform\n"
+                "updated_at: 2026-01-01T00:00:00Z\noutcome: passed\nassesses: []\n"
+                "assesses_beads:\n  - store: 'rig:probe'\n    id: 'probe-bug'\n"
+                f"    proposal_sha256: '{'a' * 64}'\ncode:\n  - repo: probe\n    commit: '{'b' * 40}'\n"
+                "---\nRead-only schema capability probe.\n")
+            verdict = derive(dict(content=content), Path(args.schema).resolve() / "derive")
+            supports = (verdict.get("verdict") == "ship"
+                        and bool((verdict.get("lifecycle") or {}).get("assesses_beads")))
+            print(json.dumps(dict(build_report_assesses_beads=supports, ship_queue_json=True)))
+            return 0
         start = Path(args.paths[0]).resolve() if args.paths else Path.cwd()
         anchor = start if start.is_dir() else start.parent
         repo = Path(_git(anchor, "rev-parse", "--show-toplevel").decode().rstrip("\n")).resolve()

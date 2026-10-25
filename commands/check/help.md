@@ -1,5 +1,10 @@
 # check
 
+`gc hindsight check --capabilities` probes the selected schema without Git or bank
+access and emits JSON. `build_report_assesses_beads: true` means report-only bug
+fixes can assess a Beads proposal with `assesses_beads` and empty `assesses`.
+`ship_queue_json: true` identifies support for `ship --json` queue receipts.
+
 Read-only validation of one repository's publishable documents. The publisher
 runs exactly these checks on every scan before it writes anything; running them
 earlier only moves the same failures closer to the edit.
