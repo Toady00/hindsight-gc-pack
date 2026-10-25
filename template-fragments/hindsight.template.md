@@ -80,6 +80,12 @@ Use `-o json` on every read command, including each command joined with
 `&&`. Older CLIs animate pretty output even in captured agent logs. Read
 reflect's `.text` as the answer; keep stderr visible and treat command
 failures as failures, not empty memory results.
+
+Hindsight CLI 1.1.0 enforces a 120-second request timeout, including reflect.
+Run each reflect in its own foreground tool call with an explicit shell/tool
+timeout of 150 seconds (`timeout: 150000` for tools using milliseconds). This
+leaves room for startup and error reporting without cutting off the CLI first.
+Wait for completion; if the CLI times out, report the failed read and context gap.
 {{if .HINDSIGHT_MENTAL_MODELS}}
 Also fetch your standing briefs before starting work — read only
 `.content`, never the whole response:
