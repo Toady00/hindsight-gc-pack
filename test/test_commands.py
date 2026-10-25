@@ -196,7 +196,8 @@ class CommandTest(CommandFixture):
         self.assertEqual(result.stdout, "fixture reflection\n")
         self.assertEqual(result.stderr, "fixture stderr\n")
         self.assertEqual(self.calls()[-1]["args"], [
-            "-o", "json", "memory", "reflect", "fixture bank", "<the task, verbatim>",
+            "-o", "json", "memory", "reflect", "fixture bank",
+            "What does the retained record establish that bears on this task: <the task, verbatim>",
             "--tags", "repo:widgets,scope:platform", "--tags-match", "any_strict", "--budget", "mid",
         ])
         self.env["MOCK_EXIT"] = "19"
@@ -306,6 +307,8 @@ class GasCityCompatibilityTest(CommandFixture):
         self.assertIn("gc hindsight read -o json memory reflect", command)
         self.assertIn("jq -er '.text'", command)
         self.assertNotIn("2>/dev/null", command)
+        self.assertIn("You own new analysis and the final recommendation for the current task or ask", prompt)
+        self.assertIn("including assessments, recommendations,", prompt)
         return command
 
     def test_rendered_rig_brief_dispatches_through_real_gc(self):
@@ -318,7 +321,8 @@ class GasCityCompatibilityTest(CommandFixture):
         self.assertEqual(result.stdout, "fixture reflection\n")
         self.assertEqual(result.stderr, "fixture stderr\n")
         self.assertEqual([c["args"] for c in self.calls()], [[
-            "-o", "json", "memory", "reflect", "fixture bank", "<the task, verbatim>",
+            "-o", "json", "memory", "reflect", "fixture bank",
+            "What does the retained record establish that bears on this task: <the task, verbatim>",
             "--tags", "repo:widgets,scope:platform", "--tags-match", "any_strict", "--budget", "mid",
         ]])
         self.env["MOCK_EXIT"] = "19"
@@ -381,7 +385,8 @@ class GasCityCompatibilityTest(CommandFixture):
         self.assertEqual(result.stdout, "fixture reflection\n")
         self.assertEqual(result.stderr, "fixture stderr\n")
         self.assertEqual(self.calls()[-1]["args"], [
-            "-o", "json", "memory", "reflect", "fixture bank", "<the ask, verbatim>",
+            "-o", "json", "memory", "reflect", "fixture bank",
+            "What does the retained record establish that bears on this ask: <the ask, verbatim>",
             "--tags", "repo:widgets,scope:platform,scope:business",
             "--tags-match", "any_strict", "--budget", "mid",
         ])

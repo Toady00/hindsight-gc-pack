@@ -5,7 +5,7 @@ The supported v1 import binding is `hindsight`, including when a consuming
 agent belongs to a different pack.
 
 ```bash
-gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "<task>" --budget mid
+gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "What does the retained record establish that bears on this task: <task>" --budget mid
 gc hindsight read -o json memory recall "$HINDSIGHT_BANK" "<question>" --budget low
 gc hindsight read -o json mental-model get "$HINDSIGHT_BANK" landmines
 ```
@@ -25,11 +25,15 @@ For reflect, extract `.text` after a successful read:
 
 ```bash
 TMP=$(mktemp -d)
-gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "<task>" --budget mid > "$TMP/reflect.json" &&
+gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "What does the retained record establish that bears on this task: <task>" --budget mid > "$TMP/reflect.json" &&
   jq -er '.text' "$TMP/reflect.json"
 ```
 
 Keep stderr visible. A failed read is not an empty memory result.
+
+Ask reflect for recorded evidence, including assessments, recommendations, and
+next steps, with their attribution and conditions. The caller owns new analysis
+and the final recommendation.
 
 The adapter shares shipping's endpoint and credential resolution, including
 the `HINDSIGHT_API` alias. Supply the bank as the operation's positional

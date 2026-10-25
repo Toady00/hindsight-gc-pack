@@ -114,8 +114,31 @@ inspect operations and repair `metadata.hindsight.data.attempt` with the known
 
 `evaluate.py` uses the production read adapter. It asks structured questions
 about drafts, owner thinking, supersession, scope, exact numeric requirements,
-and the distinction between a specification and verified implementation. No
+and the distinction between a specification and verified implementation. It also
+checks recorded conditional assessments and next steps, evolving stakeholder
+positions, missing attribution, status conflicts, absent scaling guidance, a
+retained scaling runbook, and requirements that do not endorse a proposed design. No
 accepted-source filter is added. Each run saves the full responses and a
 machine-readable pass/fail report under a temporary directory, or `--output`.
 These are regression probes, not a proof of answer quality across arbitrary
 questions. The bank is left in place for inspection; deletion is manual.
+
+Before attributing an improvement to template changes, provision a second fresh
+fixture bank using the pre-change template from
+`git show 57afac5:example.bank-template.json`.
+Ship the same current fixtures and run the same evaluator against both banks.
+A case passing with both templates checks preserved behavior, not improvement.
+The evaluator normalizes case and backticks only for designated label fields;
+commands, versions, and numeric requirements still compare exactly.
+
+After maintenance, inspect `conventions-and-standards` and
+`open-risks-and-questions` in both fixture banks. Check that their refreshes still
+report recorded preferences, unresolved questions, and recorded resolution paths
+without adding new recommendations or losing useful synthesis. Historical
+`results/mm-*.json` files are reference evidence, not golden answers.
+
+Also run the credential-interface question once without `--schema`, with
+`--include-facts`, and save the full JSON for review. The structured checks cannot
+verify that reflect states the evidence gap before discussing the design. Source
+fact lists help inspection but do not prove that every generated claim follows
+from them. These live comparisons are opt-in and are not part of offline checks.

@@ -58,7 +58,7 @@ At task start, run ONE reflect scoped to your rig and keep the answer
 for the whole task:
 
     TMP=$(mktemp -d)
-    gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "<the task, verbatim>" \
+    gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "What does the retained record establish that bears on this task: <the task, verbatim>" \
       --tags repo:{{.RigName}},scope:platform --tags-match any_strict --budget mid > "$TMP/reflect.json" &&
       jq -er '.text' "$TMP/reflect.json"
 {{else}}
@@ -68,7 +68,7 @@ the platform, scoped to what the ask touches (include `repo:<rig>` for
 every rig involved):
 
     TMP=$(mktemp -d)
-    gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "<the ask, verbatim>" \
+    gc hindsight read -o json memory reflect "$HINDSIGHT_BANK" "What does the retained record establish that bears on this ask: <the ask, verbatim>" \
       --tags repo:<rig>,scope:platform,scope:business --tags-match any_strict --budget mid > "$TMP/reflect.json" &&
       jq -er '.text' "$TMP/reflect.json"
 
@@ -86,6 +86,11 @@ Run each reflect in its own foreground tool call with an explicit shell/tool
 timeout of 150 seconds (`timeout: 150000` for tools using milliseconds). This
 leaves room for startup and error reporting without cutting off the CLI first.
 Wait for completion; if the CLI times out, report the failed read and context gap.
+
+Ask memory for recorded evidence, including assessments, recommendations,
+and next steps. Preserve their attribution, scope, conditions, and status.
+You own new analysis and the final recommendation for the current task or ask; distinguish
+your conclusions from recorded judgments.
 {{if .HINDSIGHT_MENTAL_MODELS}}
 Also fetch your standing briefs before starting work — read only
 `.content`, never the whole response:

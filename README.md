@@ -685,10 +685,11 @@ values instead of passing them through.
 
 ---
 
-## Three distinctions the bank is built to protect
+## Four distinctions the bank is built to protect
 
-Everything else follows from these. Each has a strategy separating the inputs
-and a directive keeping them apart at reflect time.
+Retain strategies preserve the source's substance, the observations mission
+keeps attribution and conditions in summaries, and directives protect these
+distinctions at reflect time.
 
 1. **Decided vs. proposed vs. thinking.** An ADR outranks a position floated in a
    meeting, which outranks an idea in a voice memo. Collapsing these means the
@@ -703,6 +704,27 @@ and a directive keeping them apart at reflect time.
    convention from one repo quietly becoming a platform standard. The
    `scope:`/`repo:` axes and the "Name the scope of every claim" directive exist
    for exactly this.
+
+4. **Recorded judgments vs. new judgments.** Feasibility assessments,
+   recommendations, and next steps in meeting notes or voice memos remain
+   retrievable. Reflect may reconcile changing positions, combine sources, and
+   apply documented rules using recorded premises. It preserves attribution,
+   scope, conditions, and decision status, and identifies its synthesis. The
+   caller owns new technical analysis and the final recommendation for its task.
+   Requirements alone do not prove a proposed design satisfies them; a recorded
+   judgment is not independent verification or approval for a new situation.
+
+Frame caller queries around what the record establishes about the task, without
+requiring the caller to know which documents exist. A missing answer is a useful
+finding. The [memory skill](skills/hindsight-memory/SKILL.md) gives examples and
+the full caller contract. These are prompt instructions, not enforced evidence
+validation; the opt-in [live evaluation](test/README.md#hindsight-answer-quality)
+checks behavior against a disposable fixture corpus.
+
+Template edits affect a bank after a reviewed import. Updated reflect missions
+and directives apply to subsequent reflect calls. The observations mission
+affects future consolidation; existing observations and mental-model content
+are not rewritten by importing the template.
 
 ---
 

@@ -15,6 +15,32 @@
   but have other unresolved differences from the validator. Do not silently edit
   those reference files or live documents.
 
+- Caller task-start reflect queries formerly passed the task verbatim, which
+  could delegate a fresh technical verdict to memory. Both rig and coordinator
+  briefs now ask what the retained record establishes about that task. Preserve
+  retrieval of recorded assessments and recommendations while keeping new
+  technical judgments with the caller. The example and evaluation templates
+  duplicate bank settings/directives; keep those portions identical. Root
+  `bank-template.json` is an untracked live-bank reference, not updated by edits
+  to the tracked templates. Observations lose status/source tags, so preserve
+  judgment attribution and conditions in their text; importing a new mission
+  does not rewrite existing observations or mental-model content.
+
+- Reflect grounding audit on 2026-10-02 UTC: the live system prompt forbids
+  external knowledge but also explicitly permits synthesis and qualitative
+  inference. A bank mission requiring document-grounded claims does not make
+  reflect a literal evidence-only lookup. The FRED path-only interface answer's
+  original trace is `72898912-7d3b-48f5-8c3f-dfef49b8f593`; its four calls sum
+  to 96,689 input / 1,372 output tokens. LLM traces preserved only 50,000-character
+  input previews for later calls, with `output: "null"` for tool-call responses
+  and tool names without final done arguments. These traces cannot recover the
+  full retrieved evidence or final supporting IDs. Request `--include-facts`
+  prospectively when auditing reflect evidence; it does not recover an old run.
+  The retained Terraform resource-discovery convention is tagged accepted and
+  contextualized as ACCEPTED, but its original text still says "Proposed
+  convention" and "This draft". Surface that status mismatch rather than
+  silently treating either representation as unambiguous authority.
+
 - Installed Hindsight CLI `0.9.1` animates pretty-mode progress on stdout,
   including captured output: reflect can flood agent logs with `Reflecting...`
   and ANSI fragments. JSON mode skips the spinner. The read adapter now defaults

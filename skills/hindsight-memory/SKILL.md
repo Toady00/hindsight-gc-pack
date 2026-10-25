@@ -37,7 +37,7 @@ BANK="${HINDSIGHT_BANK:?HINDSIGHT_BANK not set — declare it in [workspace] env
 ```bash
 # Task start — your rig name IS your repo tag
 TMP=$(mktemp -d)
-gc hindsight read -o json memory reflect "$BANK" "<the task, verbatim>" \
+gc hindsight read -o json memory reflect "$BANK" "What does the retained record establish that bears on this task: <the task, verbatim>" \
   --tags repo:<your-rig>,scope:platform --tags-match any_strict --budget mid > "$TMP/reflect.json" &&
   jq -er '.text' "$TMP/reflect.json"
 
@@ -62,6 +62,21 @@ Other standing models: `platform-architecture-and-service-map`,
 `implementation-reality-and-intent-drift`, `convention-deviations`,
 `analysis-generation-methodology`, `open-risks-and-questions`,
 `company-strategy-and-operating-model`.
+
+## What reflect answers
+
+Use Hindsight to retrieve and synthesize what the retained record establishes,
+including facts, requirements, decisions, procedures, assessments,
+recommendations, and unresolved questions. Frame questions around the recorded
+evidence relevant to your task.
+
+Preserve recorded judgments' attribution, scope, conditions, and decision status.
+A recorded assessment or recommendation does not automatically establish its
+suitability for your current situation.
+
+You own new analysis and the final recommendation for this task. Distinguish
+recorded judgments and record-based synthesis from conclusions you reach using
+your own expertise.
 
 ## Status semantics — published revisions, drafts included
 
@@ -96,6 +111,9 @@ what it establishes. An accepted survey is an observation. Voice memos have no
 acceptance or retirement lifecycle. `source:human` identifies human speech or
 human involvement in the revision, not transcript review or approval of an idea.
 Legacy status tags on a voice memo do not make its ideas settled decisions.
+
+If status tags and source wording disagree, report both. Do not silently treat
+an accepted tag as resolving a document that still describes itself as proposed.
 
 The read command resolves the same endpoint and credential as shipping,
 including the legacy `HINDSIGHT_API` alias.

@@ -71,6 +71,16 @@ class SchemaTest(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
+    def test_example_and_evaluation_bank_share_the_reasoning_contract(self):
+        example = json.loads((PACK / "example.bank-template.json").read_text())
+        evaluation = json.loads((PACK / "test/bank-template.json").read_text())
+        for key in ("bank", "directives"):
+            self.assertEqual(example[key], evaluation[key], key)
+        names = [directive["name"] for directive in example["directives"]]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn("Report recorded judgments as recorded", names)
+        self.assertIn("Do not supply judgments the record does not make", names)
+
     def test_status_policy_and_types_match_audit_vocabulary(self):
         types = json.loads((PACK / "schemas/docs/audit-vocab.json").read_text())["closed"]["memory_type"]
         self.assertEqual(set(types), set(schema.STRATEGIES))

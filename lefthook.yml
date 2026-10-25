@@ -24,4 +24,5 @@ pre-push:
         test.test_pack.ShipReportTest
         test.test_pack.ShipCLITest
         test.test_pack.RequestAndDiscoveryTest
+        test.test_evaluate
         test.test_memory_recovery.MemoryCLITest
