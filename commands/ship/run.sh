@@ -28,6 +28,7 @@ fi
 
 BANK_SET=false
 DRY_RUN=false
+QUEUE_JSON=false
 PASS=()
 ROOTS=()
 while [[ $# -gt 0 ]]; do
@@ -35,16 +36,24 @@ while [[ $# -gt 0 ]]; do
     --bank) BANK_SET=true; PASS+=("$1" "$2"); shift 2 ;;
     --api|--ref|--domains|--schema|--drain-timeout) PASS+=("$1" "$2"); shift 2 ;;
     --dry-run) DRY_RUN=true; PASS+=("$1"); shift ;;
+    --json) QUEUE_JSON=true; shift ;;
     --fetch|--reprocess) PASS+=("$1"); shift ;;
     -h|--help) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown flag: $1" >&2; exit 2 ;;
     *) ROOTS+=("$1"); shift ;;
   esac
 done
+if $QUEUE_JSON && { $DRY_RUN || hs_is_writer; }; then
+  echo "--json is for queue acknowledgements outside the managed archivist" >&2
+  exit 2
+fi
 # Normalize explicit paths before queueing: the archivist has a different cwd.
 if ! $DRY_RUN && ! hs_is_writer; then
   request="$(python3 "$PACK_DIR/assets/scripts/ship-request.py" encode "${PASS[@]}" -- "${ROOTS[@]}")"
   target="${HINDSIGHT_ARCHIVIST:-${GC_PACK_NAME:-hindsight}.archivist}"
+  if $QUEUE_JSON; then
+    exec "${GC_BIN:-gc}" sling "$target" mol-hindsight-ship --formula --var "request=$request" --json
+  fi
   "${GC_BIN:-gc}" sling "$target" mol-hindsight-ship --formula --var "request=$request"
   echo "Queued ship request for $target. Completion and findings will be recorded on the formula bead."
   exit 0

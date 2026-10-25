@@ -9,6 +9,7 @@ gc hindsight ship <root> [<root>...]  Queue a partial scan; relative paths resol
 gc hindsight ship --dry-run <root>   Preview locally without retaining or updating health
 gc hindsight ship --fetch            Accepted no-op; every scan freshly fetches origin
 gc hindsight ship --reprocess        Retain, then request server reprocessing even for unchanged docs
+gc hindsight ship --json <root>      Return native sling JSON, including the queued task ID
 gc hindsight ship --bank <id>        Select a bank; otherwise use HINDSIGHT_BANK
 ```
 

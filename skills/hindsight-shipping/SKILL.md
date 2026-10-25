@@ -270,9 +270,13 @@ Formula final steps may run the sync for immediacy:
 
 ```bash
 gc hindsight ship <docs-root>   # queues work to the archivist
+gc hindsight ship --json <docs-root>  # native queue receipt with task identity
 ```
 
 Outside the managed archivist, this queues a formula and returns after dispatch.
+The optional `--json` returns the native sling receipt without prose; preserve its
+workflow/molecule/bead ID and wait on that task rather than queuing duplicates.
+It is a queue-only option, rejected for managed-writer or dry-run execution.
 The formula bead carries the eventual result. Within the archivist it validates,
 skips unchanged docs, drains prior operations and polls new ones to terminal.
 Only the archivist may invoke write scripts directly, and it must run them one
